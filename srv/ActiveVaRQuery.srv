@@ -1,0 +1,14 @@
+int32 size
+int32 width
+int32 height
+float64 discount
+float64 confidence
+float64 alpha
+float64 delta
+float64 epsilon
+int32[] initial_states
+int32[] terminal_states
+---
+int32[] policy
+string status
+int32 query_state
