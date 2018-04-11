@@ -1,14 +1,18 @@
-int32 size
-int32 width
-int32 height
+##mdp data
+uint32 width
+uint32 height
+uint32 num_features
 float64 discount
 float64 confidence
 float64 alpha
 float64 delta
 float64 epsilon
-int32[] initial_states
-int32[] terminal_states
+uint32[] initial_states
+uint32[] terminal_states
+FloatVector[] state_features
+##demo data
+StateAction[] demonstration
 ---
-int32[] policy
+uint32[] policy
 string status
-int32 query_state
+uint32 query_state

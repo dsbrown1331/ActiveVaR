@@ -4,12 +4,27 @@
 #include <vector>
 #include <cstdlib>
 #include <sstream>
+#include "mdp.hpp"
 
 using namespace std;
 
 bool fillup(active_var::FillArray::Request  &req,
          active_var::FillArray::Response &res)
 {
+    unsigned int width = 2;
+    unsigned int height = 2;
+    vector<unsigned int> initStates = {0,1,2,3};
+    vector<unsigned int> termStates;
+    unsigned int nFeatures = 3;
+    double fWeights[] = {1,0,-1};
+    double sFeatures[][nFeatures] = {{1,0,0},{0,1,0},
+                            {0,0,1},{0,1,0}};
+    bool stochastic = false;
+    double gamma = 0.95;
+    
+    FeatureGridMDP fmdp(width, height, initStates, termStates, nFeatures, &fWeights, &sFeatures, stochastic, gamma);
+
+
   //fill int64[size] with values
   vector<int> policy(req.size);
   for(int i=0; i<req.size; i++)
@@ -22,7 +37,7 @@ bool fillup(active_var::FillArray::Request  &req,
     {
         ss << res.policy[i] << " ";
     }
-    ROS_INFO("sending back response: %s", ss.c_str());
+    ROS_INFO("sending back response: %s", ss.str().c_str());
   return true;
 }
 

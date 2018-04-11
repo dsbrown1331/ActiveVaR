@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(active_var)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+ add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -50,7 +50,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate messages in the 'msg' folder
  add_message_files(
    FILES
-   
+   StateAction.msg
+   FloatVector.msg
  )
 
 ## Generate services in the 'srv' folder
@@ -198,7 +199,7 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
-#multiply two ints srv and client
+#fill array srv and client
 add_executable(fill_array_server src/fill_array_server.cpp)
 target_link_libraries(fill_array_server ${catkin_LIBRARIES})
 add_dependencies(fill_array_server active_var_gencpp)
@@ -206,3 +207,12 @@ add_dependencies(fill_array_server active_var_gencpp)
 add_executable(fill_array_client src/fill_array_client.cpp)
 target_link_libraries(fill_array_client ${catkin_LIBRARIES})
 add_dependencies(fill_array_client active_var_gencpp)
+
+#active var srv and client
+add_executable(active_var_server src/active_var_server.cpp)
+target_link_libraries(active_var_server ${catkin_LIBRARIES})
+add_dependencies(active_var_server active_var_gencpp)
+
+add_executable(active_var_client src/active_var_client.cpp)
+target_link_libraries(active_var_client ${catkin_LIBRARIES})
+add_dependencies(active_var_client active_var_gencpp)

@@ -4,12 +4,15 @@
 #include <vector>
 #include <cstdlib>
 #include <sstream>
+#include "mdp.hpp"
 
 using namespace std;
 
 bool fillup(active_var::FillArray::Request  &req,
          active_var::FillArray::Response &res)
 {
+   
+
   //fill int64[size] with values
   vector<int> policy(req.size);
   for(int i=0; i<req.size; i++)
