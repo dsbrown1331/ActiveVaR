@@ -23,7 +23,7 @@ int main(int argc, char **argv)
   unsigned int numFeatures = 3;
   unsigned int numStates = 25;
   double discount = 0.95;
-  double birl_conf = 10;
+  double birl_conf = 20;
   double var_alpha = 0.95;
   double var_delta = 0.05;
   double stopping_var = 0.1;
@@ -72,6 +72,18 @@ int main(int argc, char **argv)
   demo.push_back(sa);
   sa.state = 3;
   sa.action = 1;
+  demo.push_back(sa);
+  sa.state = 20;
+  sa.action = 3;
+  demo.push_back(sa);
+  sa.state = 21;
+  sa.action = 3;
+  demo.push_back(sa);
+  sa.state = 22;
+  sa.action = 3;
+  demo.push_back(sa);
+  sa.state = 23;
+  sa.action = 0;
   demo.push_back(sa);
   
   srv.request.demonstration = demo;

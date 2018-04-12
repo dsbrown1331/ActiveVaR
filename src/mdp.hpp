@@ -16,6 +16,7 @@
 constexpr double lowest_double = std::numeric_limits<double>::lowest();
 
 
+#define NUM_ACTIONS 5
 
 using namespace std;
 
@@ -50,6 +51,7 @@ class MDP { // General MDP
       
       wallStates = new bool [numStates];
       fill_n(wallStates, numStates, false);
+      //cout << "wall states initialized" << endl;
      
      //initialize to all zeros
        // cout << "initializing T" <<endl;
@@ -71,31 +73,8 @@ class MDP { // General MDP
         for(unsigned int s = 0; s < numStates; s++) Q[s] = new double[numActions];
       
       };
-      void setInitialStates(bool* initials){ 
-      if(initials == nullptr) return;
-      for(unsigned int s = 0; s < numStates; s++) initialStates[s] = initials[s];
-    };
-    
-      void setTerminalStates(bool* terminals){ 
-      if(terminals == nullptr) return;
-      for(unsigned int s = 0; s < numStates; s++){
-        terminalStates[s] = terminals[s];
-          }
-        };
-        
-        void addTerminalState(unsigned int terminal){ 
-      terminalStates[terminal] = true;         
-    };  
-    
-       MDP* deepcopy(){
-        MDP* copy = new MDP(discount, numStates, numActions);
-        copy -> setInitialStates(initialStates);
-        copy -> setTerminalStates(terminalStates);
-        copy -> setRewards(R);
-        copy -> setTransitions(T);
-        return copy;
-    };
-    
+      
+      
       virtual ~MDP(){
       
           delete[] R;
@@ -155,7 +134,10 @@ class MDP { // General MDP
       bool isQInitialized() {return Qinitialized;};
       bool isVInitialized() {return Vinitialized;};
       bool* getInitialStates() const{return initialStates;};
+      bool* getWallStates() const{return wallStates;};
+      
       bool* getTerminalStates() const{return terminalStates;};
+      vector<pair<unsigned int, unsigned int>> policy_rollout(int s0, int L, vector<unsigned int> policy);
       vector<pair<unsigned int, unsigned int>> monte_carlo_argmax_rollout(int s0, int L);
       vector<pair<unsigned int, unsigned int>> epsilon_random_rollout(int s0, int L, double epsilon);
       
@@ -171,7 +153,7 @@ class MDP { // General MDP
       unsigned int getNumStates() const{ return numStates; };
       
       void displayRewards(){};
-      void displayPolicy(vector<unsigned int> & policy);
+      
       void deterministicPolicyIteration(vector<unsigned int> & policy);
       void deterministicPolicyIteration(vector<unsigned int> & policy, int steps);
       void deterministicPolicyEvaluation(vector<unsigned int> & policy, int k=30); //Default argument
@@ -184,8 +166,8 @@ class MDP { // General MDP
           for(unsigned int s = 0; s < numStates; s++) R[s] = rewards[s];
       };
       double* getRewards() const{ return R; };
-      //virtual 
-      double getReward(unsigned int state) {return R[state];}; 
+      virtual double getReward(unsigned int state) const = 0; 
+      virtual void displayPolicy(vector<unsigned int> & policy) = 0;
       
       
       //void setTransitions(vector<vector<list<pair<int,double> > > > transitions){ T = transitions; }
@@ -195,17 +177,16 @@ class MDP { // General MDP
       
       void calculateQValues();
       
-      double* getValues() const{// assert(Vinitialized); 
-      return V; };
-      double getValue(unsigned int state){ return V[state]; };
+      double* getValues() const{ assert(Vinitialized); return V; };
+      double getValue(unsigned int state){ assert(Vinitialized); return V[state]; };
       double getQValue(unsigned int state,unsigned int action)
       { 
-        //assert(Qinitialized); //need to call calculateQValues() first
+        assert(Qinitialized); //need to call calculateQValues() first
         return Q[state][action];
       };
       
       double** getQValues() { 
-       // assert(Qinitialized); //need to call calculateQValues() first
+        assert(Qinitialized); //need to call calculateQValues() first
         return Q;
       };
 
@@ -222,22 +203,516 @@ class MDP { // General MDP
             for(unsigned int a=0; a < numActions; a++)
                 Q[s][a] = qvalues[s][a];
       }
-      
+      vector<vector<double> > getOptimalStochasticPolicy();
+      void getOptimalPolicy(vector<unsigned int> & opt);
+      bool isOptimalAction(unsigned int state, unsigned int action, double tolerance=1E-4);
 };
+
+
+//Extension of MDP to allow state rewards to be linear combo of features
+class FeatureMDP: public MDP{
+   
+    protected:
+        int numFeatures;
+        double* featureWeights = nullptr;  //keeps a local copy of weights
+        double** stateFeatures = nullptr;  //just a pointer to where they are defined initially...
+           
+   
+    public:
+        FeatureMDP(unsigned int nStates, unsigned int nActions, unsigned int nFeatures, double* fWeights, double** sFeatures, double gamma): MDP(gamma, nStates, nActions), numFeatures(nFeatures)
+        {
+            featureWeights = new double[numFeatures];
+            for(int i=0; i<numFeatures; i++)
+                featureWeights[i] = fWeights[i];
+            stateFeatures = sFeatures;
+            
+            //compute cached rewards
+            computeCachedRewards();
+                        
+        };
+        
+        void computeCachedRewards()
+        {
+            //cout << "precomputing rewards" << endl;
+            for(unsigned int s = 0; s < numStates; s++) 
+                R[s] = dotProduct(stateFeatures[s], featureWeights, numFeatures);
+            //displayRewards();
+        };
+        //delete featureWeights
+        //stateFeatures should be deleted in main function somewhere in test script
+        ~FeatureMDP()
+        {
+            delete[] featureWeights;
+        
+        };
+        unsigned int getNumFeatures(){return numFeatures;};
+        double* getFeatureWeights(){ return featureWeights; };
+        double** getStateFeatures(){ return stateFeatures; };
+        double* getStateFeature(unsigned int state){return stateFeatures[state];};
+        void setFeatureWeight(unsigned int state, double weight)
+        {
+            featureWeights[state] = weight;
+            //cout << "changed weights to" << endl;
+            //for(int i=0; i<numFeatures; i++)
+            //    cout << featureWeights[i] << " ";
+            //cout << endl;
+            computeCachedRewards();
+        };
+        //multiply features by weights for state s
+        double getReward(unsigned int s) const
+        {
+            //use precomputed rewards
+            return R[s];
+        }
+        void setFeatureWeights(double* fWeights)
+        {
+            for(int i=0; i<numFeatures; i++)
+                featureWeights[i] = fWeights[i];
+            computeCachedRewards();
+        };
+        double getWeight(unsigned int state){ return featureWeights[state]; };
+        virtual void displayFeatureWeights() = 0;
+
+};
+
+
+
+
+class ChainMDP : public MDP 
+{ //1D Markov Chain 
+    protected: 
+        enum actions {LEFT, RIGHT};
+    
+    public:
+        ChainMDP(unsigned int states, vector<unsigned int> initStates, vector<unsigned int> termStates, double gamma): MDP(gamma, states, 2)
+        {
+            cout << "num states : " << numStates << endl;
+            cout << "num actions: " << numActions << endl;
+            for(unsigned int i=0; i<initStates.size(); i++)
+            {
+                int idx = initStates[i];
+                initialStates[idx] = true;
+            }
+            for(unsigned int i=0; i<termStates.size(); i++)
+            {
+                int idx = termStates[i];
+                terminalStates[idx] = true; 
+            }
+            setDeterministicChainTransitions();
+        }
+        
+        ChainMDP(unsigned int states, bool* initStates, bool* termStates, double gamma=0.95): MDP(gamma, states, 2)
+        { 
+            for(unsigned int i=0; i<numStates; i++)
+            {
+                initialStates[i] = initStates[i];
+            }
+            for(unsigned int i=0; i<numStates; i++)
+            {
+                terminalStates[i] = termStates[i]; 
+            }
+            setDeterministicChainTransitions();
+        }
+        void setDeterministicChainTransitions();
+        void displayValues();
+        void displayTransitions();
+        void displayRewards();
+        
+        double getReward(unsigned int s) const
+        { 
+            assert(R != nullptr); //reward for state not defined
+
+            return R[s];
+        };
+        
+        void displayPolicy(vector<unsigned int> & policy)
+        {
+
+            for(unsigned int s = 0; s < numStates; s++)
+            {
+                if(isTerminalState(s)) 
+                    cout << "*" << "  ";
+                else if(policy[s]==0) 
+                    cout << "<" << "  ";
+                else  
+                    cout << ">" << "  ";
+           
+            }
+            cout << endl;
+        }
+    
+};
+
+void ChainMDP::displayRewards()
+{
+    ios::fmtflags f( cout.flags() );
+    streamsize ss = std::cout.precision();
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no rewards!" << endl;
+//      return;
+//     }
+    cout << setiosflags(ios::fixed) << setprecision(2);
+          
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        cout << getReward(s) << "  ";
+    }
+    cout << endl;
+    cout.flags(f);
+    cout << setprecision(ss);
+};
+
+void ChainMDP::displayValues()
+{
+    ios::fmtflags f( cout.flags() );
+    std::streamsize ss = std::cout.precision();
+ 
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no values!" << endl;
+//      return;
+//     }
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+            cout << setiosflags(ios::fixed)
+            << setprecision(3)
+            << V[s] << "  ";
+    }
+    cout << endl;
+
+    cout.flags(f);
+    cout << setprecision(ss);
+};
+
+
+void ChainMDP::setDeterministicChainTransitions() //specific to markov chain
+{
+    assert(T != nullptr);
+    //LEFT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+
+        if( s > 0)
+        {
+            T[s][LEFT][s - 1] = 1.0;
+        }
+        else
+        { 
+            T[s][LEFT][s] = 1.0;
+        }
+
+    }
+         
+    //RIGHT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if(s + 1 < numStates)
+            T[s][RIGHT][s + 1] = 1.0;
+        else
+            T[s][RIGHT][s] = 1.0;
+
+    }
+    
+    //Terminals
+    if(terminalStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(terminalStates[s])
+           {
+               if(s  > 0) 
+                   T[s][LEFT][s - 1] = 0.0;
+               if(s + 1 < numStates) 
+                   T[s][RIGHT][s + 1] = 0.0;
+               T[s][LEFT][s] = 0.0; 
+               T[s][RIGHT][s] = 0.0;
+           }
+        }
+    }
+  
+   
+
+            
+    //check that all state transitions add up properly!
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //cout << "state " << s << endl;
+        for(unsigned int a = 0; a < numActions; a++)
+        {
+            //cout << "action " << a << endl;
+            //add up transitions
+            double sum = 0;
+            for(unsigned int s2 = 0; s2 < numStates; s2++)
+            
+                    sum += T[s][a][s2];
+            //cout << sum << endl;
+            assert(sum <= 1.0);
+        }
+    }
+
+};
+
+
+void ChainMDP::displayTransitions()
+{
+   ios::fmtflags f( cout.flags() );
+   std::streamsize ss = std::cout.precision();
+
+    cout << "-------- LEFT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][LEFT][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout << "-------- RIGHT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][RIGHT][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout.flags( f );
+    cout << setprecision(ss);
+}
+
+
+
+
+//Extension of FeatureMDP to be markov chain
+class FeatureChainMDP: public FeatureMDP{
+   
+    protected: 
+        enum actions {LEFT, RIGHT};
+   
+    public:
+        FeatureChainMDP(unsigned int states, vector<unsigned int> initStates, vector<unsigned int> termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, double gamma): FeatureMDP(states, 2, nFeatures, fWeights, sFeatures, gamma)
+        {
+            for(unsigned int i=0; i<initStates.size(); i++)
+            {
+                int idx = initStates[i];
+                initialStates[idx] = true;
+            }
+            for(unsigned int i=0; i<termStates.size(); i++)
+            {
+                int idx = termStates[i];
+                terminalStates[idx] = true; 
+            }
+            setDeterministicChainTransitions();
+        };
+        
+
+        
+        FeatureChainMDP(unsigned int states, bool* initStates, bool* termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, double gamma=0.95): FeatureMDP(states, 2, nFeatures, fWeights, sFeatures, gamma)
+        {
+           for(unsigned int i=0; i<numStates; i++)
+            {
+                initialStates[i] = initStates[i];
+            }
+            for(unsigned int i=0; i<numStates; i++)
+            {
+                terminalStates[i] = termStates[i]; 
+            }
+            setDeterministicChainTransitions();
+            
+        };
+        
+        void setDeterministicChainTransitions();
+        void displayValues();
+        void displayTransitions();
+        void displayRewards();
+        
+        void displayFeatureWeights()
+        {
+            ios::fmtflags f( cout.flags() );
+           std::streamsize ss = std::cout.precision();
+           cout << setiosflags(ios::fixed) << setprecision(4);
+            for(int i=0; i<numFeatures; i++)
+                cout << featureWeights[i] << " ";
+            cout << endl;
+            cout.flags( f );
+            cout << setprecision(ss);
+        };
+
+        void displayPolicy(vector<unsigned int> & policy)
+        {
+
+            for(unsigned int s = 0; s < numStates; s++)
+            {
+                if(isTerminalState(s)) 
+                    cout << "*" << "  ";
+                else if(policy[s]==0) 
+                    cout << "<" << "  ";
+                else  
+                    cout << ">" << "  ";
+           
+            }
+            cout << endl;
+        }
+       
+
+};
+
+
+void FeatureChainMDP::displayRewards()
+{
+    ios::fmtflags f( cout.flags() );
+    streamsize ss = std::cout.precision();
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no rewards!" << endl;
+//      return;
+//     }
+    cout << setiosflags(ios::fixed) << setprecision(2);
+          
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        cout << getReward(s) << "  ";
+    }
+    cout << endl;
+    cout.flags(f);
+    cout << setprecision(ss);
+}
+
+void FeatureChainMDP::displayValues()
+{
+    ios::fmtflags f( cout.flags() );
+    std::streamsize ss = std::cout.precision();
+ 
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no values!" << endl;
+//      return;
+//     }
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+            cout << setiosflags(ios::fixed)
+            << setprecision(3)
+            << V[s] << "  ";
+    }
+    cout << endl;
+
+    cout.flags(f);
+    cout << setprecision(ss);
+}
+
+
+void FeatureChainMDP::setDeterministicChainTransitions() //specific to markov chain
+{
+    assert(T != nullptr);
+    //LEFT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+
+        if( s > 0)
+        {
+            T[s][LEFT][s - 1] = 1.0;
+        }
+        else
+        { 
+            T[s][LEFT][s] = 1.0;
+        }
+
+    }
+         
+    //RIGHT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if(s + 1 < numStates)
+            T[s][RIGHT][s + 1] = 1.0;
+        else
+            T[s][RIGHT][s] = 1.0;
+
+    }
+    
+    //Terminals
+    if(terminalStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(terminalStates[s])
+           {
+               if(s  > 0) 
+                   T[s][LEFT][s - 1] = 0.0;
+               if(s + 1 < numStates) 
+                   T[s][RIGHT][s + 1] = 0.0;
+               T[s][LEFT][s] = 0.0; 
+               T[s][RIGHT][s] = 0.0;
+           }
+        }
+    }
+  
+   
+
+            
+    //check that all state transitions add up properly!
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //cout << "state " << s << endl;
+        for(unsigned int a = 0; a < numActions; a++)
+        {
+            //cout << "action " << a << endl;
+            //add up transitions
+            double sum = 0;
+            for(unsigned int s2 = 0; s2 < numStates; s2++)
+            
+                    sum += T[s][a][s2];
+            //cout << sum << endl;
+            assert(sum <= 1.0);
+        }
+    }
+
+}
+
+
+void FeatureChainMDP::displayTransitions()
+{
+   ios::fmtflags f( cout.flags() );
+   std::streamsize ss = std::cout.precision();
+
+    cout << "-------- LEFT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][LEFT][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout << "-------- RIGHT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][RIGHT][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout.flags( f );
+    cout << setprecision(ss);
+}
+
+
+
 
 
 class GridMDP: public MDP{ // 2D Grid MDP - defined by width*height
         
     private:
-        
-        
-        enum actions {UP, DOWN, LEFT, RIGHT};
-        
-    public:
         unsigned int gridWidth;
         unsigned int gridHeight;
         bool stochasticTransitions;
-        GridMDP(unsigned int width, unsigned int height, unsigned int nActions, vector<unsigned int> initStates, vector<unsigned int> termStates, bool stochastic=false, double gamma=0.95): MDP(gamma,width*height,nActions), gridWidth(width), gridHeight(height), stochasticTransitions(stochastic){ 
+        enum actions {UP, DOWN, LEFT, RIGHT, STAY};
+        
+    public:
+        GridMDP(unsigned int width, unsigned int height, vector<unsigned int> initStates, vector<unsigned int> termStates, bool stochastic=false, double gamma=0.95): MDP(gamma,width*height,NUM_ACTIONS), gridWidth(width), gridHeight(height), stochasticTransitions(stochastic){ 
             for(unsigned int i=0; i<initStates.size(); i++)
             {
                 int idx = initStates[i];
@@ -253,7 +728,7 @@ class GridMDP: public MDP{ // 2D Grid MDP - defined by width*height
             else
                 setDeterministicGridTransitions();
         };
-        GridMDP(unsigned int width, unsigned int height, unsigned int nActions, bool* initStates, bool* termStates, bool stochastic=false, double gamma=0.95): MDP(gamma,width*height, nActions), gridWidth(width), gridHeight(height), stochasticTransitions(stochastic){ 
+        GridMDP(unsigned int width, unsigned int height, bool* initStates, bool* termStates, bool stochastic=false, double gamma=0.95): MDP(gamma,width*height,NUM_ACTIONS), gridWidth(width), gridHeight(height), stochasticTransitions(stochastic){ 
             for(unsigned int i=0; i<numStates; i++)
             {
                 initialStates[i] = initStates[i];
@@ -281,17 +756,23 @@ class GridMDP: public MDP{ // 2D Grid MDP - defined by width*height
         
         int getGridWidth() { return gridWidth;};
         int getGridHeight(){ return gridHeight;};
+        void setWallStates(bool* walls){
+            for(unsigned int s = 0; s < numStates; s++)
+                if(walls[s])
+                   setWallState(s);
+          }
+        
+        
         bool isStochastic(){ return stochasticTransitions;};
         void displayRewards();
         void displayValues();
         void setDeterministicGridTransitions();
         void setStochasticGridTransitions();
         void displayTransitions();
-        void displayPolicy(vector<unsigned int> & policy);
+        
         void displayQValues();
-        vector<vector<double> > getOptimalStochasticPolicy();
-        void getOptimalPolicy(vector<unsigned int> & opt);
-        bool isOptimalAction(unsigned int state, unsigned int action, double tolerance=1E-4);
+
+        
         double getReward(unsigned int s) const;
         vector<unsigned int> getValidActions(unsigned int s){
             vector<unsigned int> actions;
@@ -311,6 +792,31 @@ class GridMDP: public MDP{ // 2D Grid MDP - defined by width*height
             else return s;
         }       
         
+        void displayPolicy(vector<unsigned int> & policy)
+        {
+           //ios::fmtflags f( cout.flags() );
+           //cout.flags( f );
+
+           //std::streamsize ss = std::cout.precision();
+           unsigned int count = 0;
+            for(unsigned int r = 0; r < gridHeight; r++)
+            {
+                for(unsigned int c = 0; c < gridWidth; c++)
+                {
+                    if(isTerminalState(count)) cout << "*" << "  ";
+                    else if(policy[count]==UP) cout << "\u2191" << "  ";
+                    else if(policy[count]==DOWN) cout << "\u2193" << "  ";
+                    else if(policy[count]==LEFT) cout << "\u2190" << "  ";
+                    else if(policy[count]==RIGHT) cout << "\u2192" << "  ";
+                    else if(policy[count]==STAY) cout << "\u21BA" << "  ";
+                    count++;
+                }
+                cout << endl;
+            }
+            //cout << std::setprecision(ss);
+            //cout.flags( f );
+        }
+        
                     
 };
 
@@ -321,217 +827,138 @@ double GridMDP::getReward(unsigned int s) const
   return R[s];
   
   
-}    
+};    
 
 //Extension of GridMDP to allow state rewards to be linear combo of features
-class FeatureGridMDP: public GridMDP{
+class FeatureGridMDP: public FeatureMDP{
    
     private:
-        int numFeatures;
-        double* featureWeights = nullptr;  //keeps a local copy of weights
-        double** stateFeatures = nullptr;  //just a pointer to where they are defined initially...
+        unsigned int gridWidth;
+        unsigned int gridHeight;
+        bool stochasticTransitions;
+        enum actions {UP, DOWN, LEFT, RIGHT, STAY};
            
    
     public:
-        FeatureGridMDP(unsigned int width, unsigned int height, vector<unsigned int> initStates, vector<unsigned int> termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, bool stochastic=false, double gamma=0.95): GridMDP(width, height, initStates, termStates, stochastic, gamma), numFeatures(nFeatures)
+        FeatureGridMDP(unsigned int width, unsigned int height, vector<unsigned int> initStates, vector<unsigned int> termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, bool stochastic=false, double gamma=0.95): FeatureMDP(width*height, NUM_ACTIONS, nFeatures, fWeights, sFeatures, gamma),
+        gridWidth(width), gridHeight(height), stochasticTransitions(stochastic)
         {
-            featureWeights = new double[numFeatures];
-            for(int i=0; i<numFeatures; i++)
-                featureWeights[i] = fWeights[i];
-            stateFeatures = sFeatures;
-            
-            //compute cached rewards
-            computeCachedRewards();
+            for(unsigned int i=0; i<initStates.size(); i++)
+            {
+                int idx = initStates[i];
+                initialStates[idx] = true;
+            }
+            for(unsigned int i=0; i<termStates.size(); i++)
+            {
+                int idx = termStates[i];
+                terminalStates[idx] = true; 
+            }
+            if(stochastic)
+                setStochasticGridTransitions();
+            else
+                setDeterministicGridTransitions();
                         
         };
-        
-        
-        FeatureGridMDP(unsigned int width, unsigned int height, bool* initStates, bool* termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, bool stochastic=false, double gamma=0.95): GridMDP(width, height, initStates, termStates, stochastic, gamma), numFeatures(nFeatures)
+        FeatureGridMDP(unsigned int width, unsigned int height, bool* initStates, bool* termStates, unsigned int nFeatures, double* fWeights, double** sFeatures, bool stochastic=false, double gamma=0.95): FeatureMDP(width*height, NUM_ACTIONS, nFeatures, fWeights, sFeatures, gamma),
+        gridWidth(width), gridHeight(height), stochasticTransitions(stochastic)
         {
-            featureWeights = new double[numFeatures];
-            for(int i=0; i<numFeatures; i++)
-                featureWeights[i] = fWeights[i];
-            stateFeatures = sFeatures;
-            computeCachedRewards();
+            for(unsigned int i=0; i<numStates; i++)
+            {
+                initialStates[i] = initStates[i];
+            }
+            for(unsigned int i=0; i<numStates; i++)
+            {
+                terminalStates[i] = termStates[i]; 
+            }
+            if(stochastic)
+                setStochasticGridTransitions();
+            else
+                setDeterministicGridTransitions();
             
         };
-        
-        
-        void computeCachedRewards()
-        {
-            //cout << "precomputing rewards" << endl;
-            for(unsigned int s = 0; s < numStates; s++) 
-                R[s] = dotProduct(stateFeatures[s], featureWeights, numFeatures);
-            //displayRewards();
-        };
-        //delete featureWeights
-        //stateFeatures should be deleted in main function somewhere in test script
-        ~FeatureGridMDP()
-        {
-            delete[] featureWeights;
-        
+         //TODO this is a slow way to do it...
+        void setWallState(unsigned int s){ 
+            wallStates[s] = true;
+            //reset all transitions
+            resetTransitions();
+            if(stochasticTransitions)
+                setStochasticGridTransitions();
+            else
+                setDeterministicGridTransitions();
+       
         };
         
-         FeatureGridMDP* deepcopy(){
-                FeatureGridMDP* copy = new FeatureGridMDP(gridWidth, gridHeight, initialStates, terminalStates, numFeatures, featureWeights, stateFeatures, stochasticTransitions, discount);
-                //copy -> setQValues(Q);
-                return copy;
-         };
-          long double L2_distance(FeatureGridMDP* in_mdp)
+        int getGridWidth() { return gridWidth;};
+        int getGridHeight(){ return gridHeight;};
+        void setWallStates(bool* walls){
+            for(unsigned int s = 0; s < numStates; s++)
+                if(walls[s])
+                   setWallState(s);
+          }
+        
+        
+        bool isStochastic(){ return stochasticTransitions;};
+        void displayRewards();
+        void displayValues();
+        void setDeterministicGridTransitions();
+        void setStochasticGridTransitions();
+        void displayTransitions();
+        
+        void displayQValues();
+
+
+        void displayFeatureWeights()
         {
-            long double dist = 0;
-            for(unsigned int i = 0; i < numStates; i++)
-            {
-               //cout << R[i] <<";" << in_mdp->R[i] << endl;
-               dist += pow(R[i] - in_mdp->R[i], 2); 
-            }
-            if(dist > 10000)
-            {
-                cout << " ????!!!!! ------> " << endl;
-                displayRewards();
-                in_mdp->displayRewards();
-            }
-            return sqrt(dist);
-        }
-        unsigned int getNumFeatures(){return numFeatures;};
-        double* getFeatureWeights(){ return featureWeights; };
-        double** getStateFeatures(){ return stateFeatures; };
-        double* getStateFeature(unsigned int state){return stateFeatures[state];};
-        void setFeatureWeight(unsigned int state, double weight)
-        {
-            featureWeights[state] = weight;
-            //cout << "changed weights to" << endl;
-            //for(int i=0; i<numFeatures; i++)
-            //    cout << featureWeights[i] << " ";
-            //cout << endl;
-            computeCachedRewards();
-        };
-        //multiply features by weights for state s
-        double getReward(unsigned int s) const
-        {
-            //use precomputed rewards
-            return getCachedReward(s);
-            //
-            //return dotProduct(stateFeatures[s], featureWeights, numFeatures);
-        };
-        double getCachedReward(unsigned int s) const
-        {
-            //cout << "getting cached reward" << endl;
-            return R[s];
-        }
-        void setFeatureWeights(double* fWeights)
-        {
+            //cout << "displaying" << endl;
+            ios::fmtflags f( cout.flags() );
+            std::streamsize ss = std::cout.precision();
+            cout << setiosflags(ios::fixed) << setprecision(4);
             for(int i=0; i<numFeatures; i++)
-                featureWeights[i] = fWeights[i];
-            computeCachedRewards();
-        };
-        double getWeight(unsigned int state){ return featureWeights[state]; };
-        void displayFeatureWeights();
-        void valueIteration(double eps);
-        void valueIteration(double eps, double* input_V);
+                cout << featureWeights[i] << " ";
+            cout << endl;
+            cout.flags( f );
+            cout << setprecision(ss);
+        }   
+        
+        
+        void displayPolicy(vector<unsigned int> & policy)
+        {
+           //ios::fmtflags f( cout.flags() );
+           //cout.flags( f );
+
+           //std::streamsize ss = std::cout.precision();
+           unsigned int count = 0;
+            for(unsigned int r = 0; r < gridHeight; r++)
+            {
+                for(unsigned int c = 0; c < gridWidth; c++)
+                {
+                    if(isTerminalState(count)) cout << "*" << "  ";
+                    else if(isWallState(count)) cout << "w" << "  ";
+                    else if(policy[count]==UP) cout << "\u2191" << "  ";
+                    else if(policy[count]==DOWN) cout << "\u2193" << "  ";
+                    else if(policy[count]==LEFT) cout << "\u2190" << "  ";
+                    else if(policy[count]==RIGHT) cout << "\u2192" << "  ";
+                    else if(policy[count]==STAY) cout << "\u21BA" << "  ";
+                    count++;
+                }
+                cout << endl;
+            }
+            //cout << std::setprecision(ss);
+            //cout.flags( f );
+        }
+
+
 };
 
 
-void FeatureGridMDP::valueIteration(double eps)
-{
-    Vinitialized = true;
-  //cout << "here in value iteration!" << endl;
-  double delta = 0;
-  for(unsigned int s = 0; s < numStates; s++)
-  {
-    V[s] = R[s];
-  }
-  double* new_V = new double[numStates];
-  for(unsigned int s = 0; s < numStates; s++) new_V[s] = R[s];
-  //repeat until convergence within error eps
-  do
-  {
-    delta = 0;
-    for(unsigned int s1 = 0; s1 < numStates; s1++)
-    {
-      new_V[s1] = R[s1];
-      //add discounted max over actions of value of next state
-      double maxActionValue = -1000000;
-      for(unsigned int a = 0; a < numActions; a++)
-      {
-        //cout << s1 << "," << a << "; ";
-        //calculate expected utility of taking action a in state s1
-        unsigned int s2 =  getNextState(s1,a);
-        double expUtil = T[s1][a][s2] * V[s2];
-        if(expUtil > maxActionValue)
-          maxActionValue = expUtil;
-      }
-      new_V[s1] += discount * maxActionValue;
-
-      //update delta to track convergence
-      double absDiff = abs(new_V[s1] - V[s1]);
-      if(absDiff > delta) delta = absDiff;
-    }
-    
-    for(unsigned int s = 0; s < numStates; s++) V[s] = new_V[s];
-    
-  }
-  while( delta > eps * (1 - discount) / discount);
-  delete new_V;
-}
 
 
-void FeatureGridMDP::valueIteration(double eps, double* input_V)
-{
-    Vinitialized = true;
-  //cout << "here in value iteration!" << endl;
-  double delta = 0;
-  for(unsigned int s = 0; s < numStates; s++)
-  {
-    V[s] = input_V[s];
-  }
-  double* new_V = new double[numStates];
-  for(unsigned int s = 0; s < numStates; s++) new_V[s] = R[s];
-  //repeat until convergence within error eps
-  do
-  {
-    delta = 0;
-    for(unsigned int s1 = 0; s1 < numStates; s1++)
-    {
-      new_V[s1] = R[s1];
-      //add discounted max over actions of value of next state
-      double maxActionValue = -1000000;
-      for(unsigned int a = 0; a < numActions; a++)
-      {
-        //cout << s1 << "," << a << "; ";
-        //calculate expected utility of taking action a in state s1
-        unsigned int s2 =  getNextState(s1,a);
-        double expUtil = T[s1][a][s2] * V[s2];
-        if(expUtil > maxActionValue)
-          maxActionValue = expUtil;
-      }
-      new_V[s1] += discount * maxActionValue;
 
-      //update delta to track convergence
-      double absDiff = abs(new_V[s1] - V[s1]);
-      if(absDiff > delta) delta = absDiff;
-    }
-    
-    for(unsigned int s = 0; s < numStates; s++) V[s] = new_V[s];
-    
-  }
-  while( delta > eps * (1 - discount) / discount);
-  delete new_V;
-}
 
-void FeatureGridMDP::displayFeatureWeights()
-{
-    ios::fmtflags f( cout.flags() );
-   std::streamsize ss = std::cout.precision();
-   cout << setiosflags(ios::fixed) << setprecision(4);
-    for(int i=0; i<numFeatures; i++)
-        cout << featureWeights[i] << " ";
-    cout << endl;
-    cout.flags( f );
-    cout << setprecision(ss);
-}
 
-bool GridMDP::isOptimalAction(unsigned int state, unsigned int action, double tolerance)
+
+
+bool MDP::isOptimalAction(unsigned int state, unsigned int action, double tolerance)
 {
     assert(Qinitialized);
     double max_q = lowest_double;
@@ -548,7 +975,7 @@ bool GridMDP::isOptimalAction(unsigned int state, unsigned int action, double to
 
 }
 
-void GridMDP::getOptimalPolicy(vector<unsigned int> & opt)
+void MDP::getOptimalPolicy(vector<unsigned int> & opt)
 {
    if(!Qinitialized)
        calculateQValues();
@@ -568,7 +995,7 @@ void GridMDP::getOptimalPolicy(vector<unsigned int> & opt)
      }
 }
 
-vector<vector<double> > GridMDP::getOptimalStochasticPolicy()
+vector<vector<double> > MDP::getOptimalStochasticPolicy()
 {
   vector<vector<double> > opt_stochastic;
 
@@ -599,7 +1026,7 @@ vector<vector<double> > GridMDP::getOptimalStochasticPolicy()
 
 void MDP::calculateQValues()
 {
-   //  assert(Vinitialized);
+     assert(Vinitialized);
      assert(R != nullptr); 
      //cout << "[ERROR] Reward has not been initialized!" << endl;
      assert(T != nullptr);
@@ -622,30 +1049,8 @@ void MDP::calculateQValues()
 }
 
 
-void GridMDP::displayPolicy(vector<unsigned int> & policy)
-{
-   //ios::fmtflags f( cout.flags() );
-   //cout.flags( f );
 
-   //std::streamsize ss = std::cout.precision();
-   unsigned int count = 0;
-    for(unsigned int r = 0; r < gridHeight; r++)
-    {
-        for(unsigned int c = 0; c < gridWidth; c++)
-        {
-            if(isTerminalState(count)) cout << "*" << "  ";
-            else if(isWallState(count)) cout << "w" << "  ";
-            else if(policy[count]==0) cout << "^" << "  ";
-            else if(policy[count]==1) cout << "v" << "  ";
-            else if(policy[count]==2) cout << "<" << "  ";
-            else cout << ">" << "  ";
-            count++;
-        }
-        cout << endl;
-    }
-    //cout << std::setprecision(ss);
-    //cout.flags( f );
-}
+
 
 
 
@@ -692,6 +1097,75 @@ void GridMDP::displayTransitions()
         }
         cout << endl;
     }
+     cout << "-------- STAY ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << setiosflags(ios::fixed)
+                 << setprecision(2)
+                 << T[s1][STAY][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout.flags( f );
+    cout << setprecision(ss);
+}
+
+void FeatureGridMDP::displayTransitions()
+{
+   ios::fmtflags f( cout.flags() );
+   std::streamsize ss = std::cout.precision();
+
+    cout << "-------- UP ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << setiosflags(ios::fixed)
+            << setprecision(2)
+            << T[s1][UP][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout << "-------- DOWN ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][DOWN][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout << "-------- LEFT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][LEFT][s2] << " ";
+        }
+        cout << endl;
+    }
+    cout << "-------- RIGHT ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << T[s1][RIGHT][s2] << " ";
+        }
+        cout << endl;
+    }
+     cout << "-------- STAY ----------" << endl;
+    for(unsigned int s1 = 0; s1 < numStates; s1++)
+    {
+        for(unsigned int s2 = 0; s2 < numStates; s2++)
+        {
+            cout << setiosflags(ios::fixed)
+                 << setprecision(2)
+                 << T[s1][STAY][s2] << " ";
+        }
+        cout << endl;
+    }
     cout.flags( f );
     cout << setprecision(ss);
 }
@@ -704,7 +1178,7 @@ void GridMDP::displayQValues()
       cout << "ERROR: no Q values!" << endl;
       return;
     }
-   // assert(Qinitialized);
+    assert(Qinitialized);
     cout << "-------- UP ----------" << endl;
     for(unsigned int r = 0; r < gridHeight; r++)
     {
@@ -746,6 +1220,84 @@ void GridMDP::displayQValues()
         {
             unsigned int state = r*gridWidth + c;
             cout << Q[state][RIGHT] << "  ";
+        }
+        cout << endl;
+    }
+    cout << "-------- STAY ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << Q[state][STAY] << "  ";
+        }
+        cout << endl;
+    }
+    cout.flags( f );
+    cout << setprecision(ss);
+}
+
+
+void FeatureGridMDP::displayQValues()
+{
+    ios::fmtflags f( cout.flags() );
+    std::streamsize ss = std::cout.precision();
+    if (Q == nullptr){
+      cout << "ERROR: no Q values!" << endl;
+      return;
+    }
+    assert(Qinitialized);
+    cout << "-------- UP ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << setiosflags(ios::fixed)
+            << setprecision(3)
+            << Q[state][UP] << "  ";
+        }
+        cout << endl;
+    }
+        cout << "-------- DOWN ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << Q[state][DOWN] << "  ";
+        }
+        cout << endl;
+    }
+
+    cout << "-------- LEFT ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << Q[state][LEFT] << "  ";
+        }
+        cout << endl;
+    }
+
+    cout << "-------- RIGHT ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << Q[state][RIGHT] << "  ";
+        }
+        cout << endl;
+    }
+    cout << "-------- STAY ----------" << endl;
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << Q[state][STAY] << "  ";
         }
         cout << endl;
     }
@@ -998,7 +1550,8 @@ void MDP::valueIteration(double eps, double* input_v) //warm start
 
 void GridMDP::setDeterministicGridTransitions() //specific to grid MDP
 {
-    
+    //cout << "deterministic transitions" << endl;
+    //cout << "num actions " << numActions << endl;
     //Transition matrices for actions
     //UP
     for(unsigned int s = 0; s < numStates; s++)
@@ -1036,6 +1589,136 @@ void GridMDP::setDeterministicGridTransitions() //specific to grid MDP
         else
             T[s][RIGHT][s] = 1.0;
 
+    }
+    //STAY
+    for(unsigned int s=0; s < numStates; s++)
+        T[s][STAY][s] = 1.0;
+    
+    //Terminals
+    if(terminalStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(terminalStates[s])
+           {
+               //cout << "for state " << s << endl;
+               if(s >= gridWidth) T[s][UP][s - gridWidth] = 0.0;
+               if(s < (gridHeight - 1) * gridWidth) T[s][DOWN][s + gridWidth] = 0.0;
+               if(s % gridWidth > 0) T[s][LEFT][s - 1] = 0.0;
+               if(s % gridWidth < gridWidth - 1) T[s][RIGHT][s + 1] = 0.0;
+               T[s][UP][s] = 0.0;
+               T[s][DOWN][s] = 0.0;
+               T[s][LEFT][s] = 0.0; 
+               T[s][RIGHT][s] = 0.0;
+               T[s][STAY][s] = 0.0;
+           }
+        }
+    }
+    
+    //set wall states to have zero transitions in or out
+    if(wallStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(wallStates[s])
+           {
+                //no transitions outgoing
+                for(unsigned int s2 = 0; s2 < numStates; s2++)
+                {
+                   T[s][UP][s2] = 0.0;
+                   T[s][DOWN][s2] = 0.0;
+                   T[s][LEFT][s2] = 0.0; 
+                   T[s][RIGHT][s2] = 0.0;
+                   T[s][STAY][s2] = 0.0;
+                   
+                }
+           }
+        }
+    }
+    
+    
+    /* for(unsigned int s1 = 0; s1 < numStates; s1++)
+            {
+                for(unsigned int a = 0; a < numActions; a++)
+                {
+                    for(unsigned int p = 0; p < numStates; p++){
+                        cout << s1 << a << p << ":" << T[s1][a][p] << endl;
+                     }
+                }
+            }*/
+            
+    //check that all state transitions add up properly!
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //cout << "state " << s << endl;
+        for(unsigned int a = 0; a < numActions; a++)
+        {
+            //cout << "action " << a << endl;
+            //add up transitions
+            double sum = 0;
+            for(unsigned int s2 = 0; s2 < numStates; s2++)
+            
+                    sum += T[s][a][s2];
+            //cout << sum << endl;
+            assert(sum <= 1.0);
+        }
+    }
+
+}
+
+
+void FeatureGridMDP::setDeterministicGridTransitions() //specific to grid MDP
+{
+    //cout << "setting up det transitions for feature grid" << endl;
+    //Transition matrices for actions
+    //UP
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if((s >= gridWidth) && !isWallState(s - gridWidth))
+            T[s][UP][s - gridWidth] = 1.0;
+            
+        else
+            T[s][UP][s] = 1.0;
+
+    }
+    //DOWN
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //cout << gridWidth << endl;
+        //cout << isWallState(s + gridWidth) << endl;
+        if((s < (gridHeight - 1) * gridWidth) && !isWallState(s + gridWidth))
+            T[s][DOWN][s + gridWidth] = 1.0;
+        else
+            T[s][DOWN][s] = 1.0;
+
+    }
+    //LEFT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if(((s % gridWidth) > 0) && !isWallState(s-1))
+            T[s][LEFT][s - 1] = 1.0;
+        else
+            T[s][LEFT][s] = 1.0;
+
+    }
+    //RIGHT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if((s % gridWidth < gridWidth - 1) && !isWallState(s+1))
+            T[s][RIGHT][s + 1] = 1.0;
+        else
+            T[s][RIGHT][s] = 1.0;
+
+    }
+    //STAY
+    for(unsigned int s=0; s < numStates; s++)
+    {
+        //cout << "numActions" << numActions << endl;
+        //cout << STAY << endl;
+        //cout << s << endl;
+        T[s][STAY][s] = 1.0;
     }
     
     //Terminals
@@ -1110,8 +1793,197 @@ void GridMDP::setDeterministicGridTransitions() //specific to grid MDP
 
 }
 
+
 //TODO: figure out how walls and stochastic transitions should work
 void GridMDP::setStochasticGridTransitions() //specific to grid MDP
+{
+    cout << "stochastic transitions " << endl;
+    cout << "num actions " << numActions << endl;
+    //Transition matrices for actions
+    //UP
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        
+        //go forward
+        if(s >= gridWidth)
+            T[s][UP][s - gridWidth] = 0.7;
+        else    
+            T[s][UP][s] = 0.7;
+        //posibility of going left
+        if(s % gridWidth == 0) 
+            T[s][UP][s] = 0.15;
+        else
+            T[s][UP][s-1] = 0.15;
+        //possibility of going right
+        if(s % gridWidth < gridWidth - 1)
+            T[s][UP][s+1] = 0.15;
+        else
+            T[s][UP][s] = 0.15;
+        
+        //check top left corner case
+        if(s < gridWidth && s % gridWidth == 0)
+            T[s][UP][s] = 0.7 + 0.15;
+        //check top right corner case
+        else if((s < gridWidth) && (s % gridWidth == gridWidth - 1))
+            T[s][UP][s] = 0.7 + 0.15;
+    }
+    //DOWN
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //go down
+        if(s < (gridHeight - 1) * gridWidth)
+            T[s][DOWN][s + gridWidth] = 0.7;
+        else
+            T[s][DOWN][s] = 0.7;
+        //posibility of going left
+        if(s % gridWidth == 0) 
+            T[s][DOWN][s] = 0.15;
+        else
+            T[s][DOWN][s-1] = 0.15;
+        //possibility of going right
+        if(s % gridWidth < gridWidth - 1)
+            T[s][DOWN][s+1] = 0.15;
+        else
+            T[s][DOWN][s] = 0.15;
+
+        //check bottom left corner case
+        if(s >= (gridHeight - 1) * gridWidth && s % gridWidth == 0)
+            T[s][DOWN][s] = 0.7 + 0.15;
+        //check bottom right corner case
+        else if(s >= (gridHeight - 1) * gridWidth && s % gridWidth == gridWidth - 1)
+            T[s][DOWN][s] = 0.7 + 0.15;
+    }   
+    //LEFT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //go left
+        if(s % gridWidth > 0)
+            T[s][LEFT][s - 1] = 0.7;
+        else
+            T[s][LEFT][s] = 0.7;
+        //go up
+        if(s >= gridWidth)
+            T[s][LEFT][s - gridWidth] = 0.15;
+        else
+            T[s][LEFT][s] = 0.15;
+        //go down
+        if(s < (gridHeight - 1) * gridWidth)
+            T[s][LEFT][s + gridWidth] = 0.15;
+        else
+            T[s][LEFT][s] = 0.15;
+
+        //check top left corner case
+        if(s < gridWidth && s % gridWidth == 0)
+            T[s][LEFT][s] = 0.7 + 0.15;
+        //check bottom left corner case
+        else if(s >= (gridHeight - 1) * gridWidth && s % gridWidth == 0)
+            T[s][LEFT][s] = 0.7 + 0.15;
+
+
+    }
+    //RIGHT
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        if(s % gridWidth < gridWidth - 1)
+            T[s][RIGHT][s + 1] = 0.7;
+        else
+            T[s][RIGHT][s] = 0.7;
+        //go up
+        if(s >= gridWidth)
+            T[s][RIGHT][s - gridWidth] = 0.15;
+        else
+            T[s][RIGHT][s] = 0.15;
+        //go down
+        if(s < (gridHeight - 1) * gridWidth)
+            T[s][RIGHT][s + gridWidth] = 0.15;
+        else
+            T[s][RIGHT][s] = 0.15;
+        //check top right corner case
+        if((s < gridWidth) && (s % gridWidth == gridWidth - 1))
+            T[s][RIGHT][s] = 0.7 + 0.15;
+        //check bottom right corner case
+        else if(s >= (gridHeight - 1) * gridWidth && s % gridWidth == gridWidth - 1)
+            T[s][RIGHT][s] = 0.7 + 0.15;
+
+    }
+    //STAY
+    for(unsigned int s=0; s < numStates; s++)
+        T[s][STAY][s] = 1.0;
+    
+    //Terminals
+    if(terminalStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(terminalStates[s])
+           {
+               for(unsigned int s1 = 0; s1 < numStates; s1++)
+               {
+                   //set all outgoing transitions to zero
+                   T[s][UP][s1] = 0.0;
+                   T[s][DOWN][s1] = 0.0;
+                   T[s][LEFT][s1] = 0.0;
+                   T[s][RIGHT][s1] = 0.0;
+                   T[s][STAY][s1] = 0.0;
+               }
+           }
+        }
+    }
+    
+      //set wall states to have zero transitions in or out
+    if(wallStates != nullptr) 
+    {
+        //cout << "setting up terminals" << endl;
+        for(unsigned int s = 0; s < numStates; s++)
+        {
+           if(wallStates[s])
+           {
+                //no transitions outgoing
+                for(unsigned int s2 = 0; s2 < numStates; s2++)
+                {
+                   T[s][UP][s2] = 0.0;
+                   T[s][DOWN][s2] = 0.0;
+                   T[s][LEFT][s2] = 0.0; 
+                   T[s][RIGHT][s2] = 0.0;
+                   T[s][STAY][s2] = 0.0;
+                
+                }
+           }
+        }
+    }
+    
+    /* for(unsigned int s1 = 0; s1 < numStates; s1++)
+            {
+                for(unsigned int a = 0; a < numActions; a++)
+                {
+                    for(unsigned int p = 0; p < numStates; p++){
+                        cout << s1 << a << p << ":" << T[s1][a][p] << endl;
+                     }
+                }
+            }*/
+            
+    //check that no states have more than 1.0 prob of transition!
+    for(unsigned int s = 0; s < numStates; s++)
+    {
+        //cout << "state " << s << endl;
+        for(unsigned int a = 0; a < numActions; a++)
+        {
+            //cout << "action " << a << endl;
+            //add up transitions
+            double sum = 0;
+            for(unsigned int s2 = 0; s2 < numStates; s2++)
+            
+                    sum += T[s][a][s2];
+            //cout << sum << endl;
+            assert(sum <= 1.0);
+        }
+    }
+
+}
+
+//TODO: figure out how walls and stochastic transitions should work
+void FeatureGridMDP::setStochasticGridTransitions() //specific to grid MDP
 {
     
     //Transition matrices for actions
@@ -1276,22 +2148,46 @@ void GridMDP::setStochasticGridTransitions() //specific to grid MDP
     //check that no states have more than 1.0 prob of transition!
     for(unsigned int s = 0; s < numStates; s++)
     {
-        cout << "state " << s << endl;
+        //cout << "state " << s << endl;
         for(unsigned int a = 0; a < numActions; a++)
         {
-            cout << "action " << a << endl;
+            //cout << "action " << a << endl;
             //add up transitions
             double sum = 0;
             for(unsigned int s2 = 0; s2 < numStates; s2++)
             
                     sum += T[s][a][s2];
-            cout << sum << endl;
+            //cout << sum << endl;
             assert(sum <= 1.0);
         }
     }
 
 }
 
+
+void FeatureGridMDP::displayRewards()
+{
+    ios::fmtflags f( cout.flags() );
+    streamsize ss = std::cout.precision();
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no rewards!" << endl;
+//      return;
+//     }
+    cout << setiosflags(ios::fixed) << setprecision(2);
+            
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << getReward(state) << "  ";
+        }
+        cout << endl;
+    }
+    cout.flags(f);
+    cout << setprecision(ss);
+}
 
 void GridMDP::displayRewards()
 {
@@ -1342,6 +2238,31 @@ void GridMDP::displayValues()
     cout << setprecision(ss);
 }
 
+void FeatureGridMDP::displayValues()
+{
+    ios::fmtflags f( cout.flags() );
+    std::streamsize ss = std::cout.precision();
+ 
+    assert(R != nullptr);
+//    if (R == nullptr){
+//      cout << "ERROR: no values!" << endl;
+//      return;
+//     }
+    for(unsigned int r = 0; r < gridHeight; r++)
+    {
+        for(unsigned int c = 0; c < gridWidth; c++)
+        {
+            unsigned int state = r*gridWidth + c;
+            cout << setiosflags(ios::fixed)
+            << setprecision(3)
+            << V[state] << "  ";
+        }
+        cout << endl;
+    }
+    cout.flags(f);
+    cout << setprecision(ss);
+}
+
 
 
 bool operator== (MDP & lhs, MDP & rhs)
@@ -1364,8 +2285,8 @@ double dotProduct(double x[], double y[], int length)
         result += x[i] * y[i];
     return result;
 }
-/*
-double policyLoss(vector<unsigned int> policy, GridMDP * mdp)
+
+double policyLoss(vector<unsigned int> policy, MDP * mdp)
 {
     unsigned int count = 0;
     if(!mdp->isQInitialized())
@@ -1379,7 +2300,46 @@ double policyLoss(vector<unsigned int> policy, GridMDP * mdp)
         }
     }
     return (double)count/(double)policy.size()*100;
-}*/
+}
+
+//    """compute a rollout starting in start_state s0 of length L
+//at every state an action is chosen from policy
+//       and a transition is sampled from. This continues for L iterations
+//       or until a terminal is reached"""
+// uses Q-values 
+vector<pair<unsigned int, unsigned int>> MDP::policy_rollout(int s0, int L, vector<unsigned int> policy)
+{
+    vector<pair<unsigned int,unsigned int>> rollout;
+
+    int state = s0;
+    int count = 0;
+    while(!MDP::isTerminalState(state) && count < L)
+    {
+        //sample from actions based on q_values
+        int a = policy[state];
+        rollout.push_back(make_pair(state, a));
+        double*** T = getTransitions();
+        vector<double> trans_probs;
+        vector<int> reachable_states;
+        for(unsigned int s = 0; s < getNumStates(); s++)
+        {
+            if(T[state][a][s] > 0)
+            {
+                trans_probs.push_back(T[state][a][s]);
+                reachable_states.push_back(s);
+            }
+        }
+        int next_state_idx = roulette_wheel(trans_probs);
+        state = reachable_states[next_state_idx];
+        count += 1;
+    }
+    //if rollout of length L should end in terminal add terminal and 0 action
+    if(MDP::isTerminalState(state) && count < L)
+        rollout.push_back(make_pair(state,0));
+        
+    return rollout;
+}
+
 
 //    """compute a rollout starting in start_state s0 of length L
 //at every state an action is chosen as argmax on Q-values (random tie-breaks)
@@ -1388,8 +2348,8 @@ double policyLoss(vector<unsigned int> policy, GridMDP * mdp)
 // uses Q-values 
 vector<pair<unsigned int, unsigned int>> MDP::monte_carlo_argmax_rollout(int s0, int L)
 {
- //   assert(MDP::isQInitialized());
- //   assert(MDP::isVInitialized());
+    assert(MDP::isQInitialized());
+    assert(MDP::isVInitialized());
     vector<pair<unsigned int,unsigned int>> rollout;
 
     int state = s0;
@@ -1398,7 +2358,7 @@ vector<pair<unsigned int, unsigned int>> MDP::monte_carlo_argmax_rollout(int s0,
     {
         //sample from actions based on q_values
         vector<double> state_q_vals(numActions);
-        for(int a = 0; a < numActions; a++)
+        for(unsigned int a = 0; a < numActions; a++)
             state_q_vals[a] = getQValue(state, a);
         vector<int> best_actions =  argmax_all(state_q_vals);
         int a = best_actions[rand() % best_actions.size()];
@@ -1418,8 +2378,8 @@ vector<pair<unsigned int, unsigned int>> MDP::monte_carlo_argmax_rollout(int s0,
         state = reachable_states[next_state_idx];
         count += 1;
     }
-    //if rollout ends in terminal add terminal and 0 action
-    if(MDP::isTerminalState(state))
+    //if rollout of length L should end in terminal add terminal and 0 action
+    if(MDP::isTerminalState(state) && count < L)
         rollout.push_back(make_pair(state,0));
         
     return rollout;
@@ -1447,7 +2407,7 @@ vector<pair<unsigned int, unsigned int>> MDP::epsilon_random_rollout(int s0, int
         {
             //sample from actions based on q_values
             vector<double> state_q_vals(numActions);
-            for(int a = 0; a < numActions; a++)
+            for(unsigned int a = 0; a < numActions; a++)
                 state_q_vals[a] = getQValue(state, a);
             vector<int> best_actions =  argmax_all(state_q_vals);
             a = best_actions[rand() % best_actions.size()];

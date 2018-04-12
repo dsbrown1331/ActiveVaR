@@ -17,6 +17,7 @@ pair<unsigned int, double> calculateVaRquery(FeatureBIRL* birl, vector<unsigned 
     cout << "calculating VaR" << endl;
     unsigned int chain_length = birl->getChainLength();
     unsigned int num_states = birl->getGridHeight() * birl->getGridWidth();
+    double eps = birl->getValueIterationStoppingThreshold();
     //Get V^* and V^\pi_eval for each state 
 
     vector<vector<double>> evds(initStates.size(), vector<double>(chain_length));
@@ -42,7 +43,7 @@ pair<unsigned int, double> calculateVaRquery(FeatureBIRL* birl, vector<unsigned 
         //cout << "True Exp Val" << endl;
         //cout << Vstar << endl;
         //cout << "Eval Policy" << endl; 
-        vector<double> Vhat_vec = evaluateExpectedReturnVector(eval_policy, sampleMDP, 0.0001);
+        vector<double> Vhat_vec = evaluateExpectedReturnVector(eval_policy, sampleMDP, eps);
         //cout << "Vhat_vec" << endl;
         //cout << Vhat << endl;
         //save EVDiffs for each starting state for this hypothesis reward
@@ -50,6 +51,7 @@ pair<unsigned int, double> calculateVaRquery(FeatureBIRL* birl, vector<unsigned 
         {
             //cout << j << endl;
             double EVDiff = Vstar_vec[j] - Vhat_vec[j];
+            ROS_ASSERT_MSG(EVDiff > -0.01,"evd < 0 should never happen %f",EVDiff);
             //cout << "evddiff" << EVDiff << endl;
             evds[j][i] = EVDiff;
             //cout << "saved" << endl;
@@ -166,7 +168,8 @@ bool active_query(active_var::ActiveVaRQuery::Request  &req,
     double step = 0.05;
     int sample_flag = 4;                      //param for mcmc walk type
     int num_steps = 10;                       //tweaks per step in mcmc
-    bool mcmc_reject_flag = true;   
+    double value_iteration_threshold = 0.0001;
+    bool mcmc_reject = true;   
     double conf = req.confidence;
     double var_alpha = req.alpha;
     double delta = req.delta;  //TODO: use this in computing VaR bound
@@ -190,7 +193,7 @@ bool active_query(active_var::ActiveVaRQuery::Request  &req,
     
     //FeatureBIRL birl(&fmdp, min_reward, max_reward, chain_length, step, conf, sample_flag,
     //  mcmc_reject_flag, num_steps); //mine
-    FeatureBIRL birl(&fmdp, min_reward, max_reward, chain_length, step, conf, stochastic);
+    FeatureBIRL birl(&fmdp, min_reward, max_reward, chain_length, step, conf, sample_flag, mcmc_reject, num_steps, value_iteration_threshold);
     birl.addPositiveDemos(demo);
     cout << "running birl" << endl;
     birl.displayDemos();
@@ -201,7 +204,7 @@ bool active_query(active_var::ActiveVaRQuery::Request  &req,
     mapMDP->displayRewards();
     cout << "Recovered policy" << endl;        
     vector<unsigned int> map_policy  (mapMDP->getNumStates());
-    mapMDP->valueIteration(0.0001);
+    mapMDP->valueIteration(value_iteration_threshold);
     mapMDP->calculateQValues();
     mapMDP->getOptimalPolicy(map_policy);
     mapMDP->displayPolicy(map_policy);

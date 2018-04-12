@@ -4,23 +4,22 @@
 #include <math.h>
 #include <string>
 #include <unordered_map>
-#include <assert.h>
 
-double evaluateExpectedReturn(  vector<unsigned int> & policy, 
-                      MDP* evalMDP, double eps);
+double evaluateExpectedReturn(const vector<unsigned int> & policy, 
+                    const MDP* evalMDP, double eps);
                     
                     
-void policyValueIteration(  vector<unsigned int> & policy, 
-                      MDP* evalMDP, double eps, double* V);
+void policyValueIteration(const vector<unsigned int> & policy, 
+                    const MDP* evalMDP, double eps, double* V);
                     
-double getExpectedReturn(  MDP* mdp);
+double getExpectedReturn(const MDP* mdp);
 double getAverageValueFromStartStates(double* V, bool* init, unsigned int numStates);
-double** calculateStateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureGridMDP* fmdp, double eps);
-double* calculateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureGridMDP* fmdp, double eps);
-double* calculateEmpiricalExpectedFeatureCounts(vector<vector<pair<unsigned int,unsigned int> > > trajectories, FeatureGridMDP* fmdp);
+double** calculateStateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureMDP* fmdp, double eps);
+double* calculateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureMDP* fmdp, double eps);
+double* calculateEmpiricalExpectedFeatureCounts(vector<vector<pair<unsigned int,unsigned int> > > trajectories, FeatureMDP* fmdp);
 
-double evaluateExpectedReturn(  vector<unsigned int> & policy, 
-                      MDP* evalMDP, double eps)
+double evaluateExpectedReturn(const vector<unsigned int> & policy, 
+                    const MDP* evalMDP, double eps)
 {
     //initialize values to zero
     unsigned int numStates = evalMDP->getNumStates();
@@ -37,8 +36,8 @@ double evaluateExpectedReturn(  vector<unsigned int> & policy,
 }
 
 
-vector<double> evaluateExpectedReturnVector(  vector<unsigned int> & policy, 
-                      MDP* evalMDP, double eps)
+vector<double> evaluateExpectedReturnVector(const vector<unsigned int> & policy, 
+                    const MDP* evalMDP, double eps)
 {
     //initialize values to zero
     vector<double> init_state_returns;
@@ -96,8 +95,8 @@ double getAverageValueFromStartStates(double* V, bool* init, unsigned int numSta
 
 //Updates vector of values V to be value of using policy in evalMDP
 //run value iteration until convergence using policy actions rather than argmax
-void policyValueIteration(  vector<unsigned int> & policy, 
-                      MDP* evalMDP, double eps, double* V)
+void policyValueIteration(const vector<unsigned int> & policy, 
+                    const MDP* evalMDP, double eps, double* V)
 {
     double delta;
     double discount = evalMDP->getDiscount();
@@ -143,7 +142,7 @@ void policyValueIteration(  vector<unsigned int> & policy,
 
 //returns the expected return of the optimal policy for the input mdp
 //assumes value iteration has already been run
-double getExpectedReturn(  MDP* mdp)
+double getExpectedReturn(const MDP* mdp)
 {
     unsigned int numStates = mdp->getNumStates();
     double* V = mdp->getValues();
@@ -154,7 +153,7 @@ double getExpectedReturn(  MDP* mdp)
 
 //returns the expected return of the optimal policy for the input mdp
 //assumes value iteration has already been run
-vector<double> getExpectedReturnVector(  MDP* mdp)
+vector<double> getExpectedReturnVector(const MDP* mdp)
 {
     vector<double> init_state_returns;
     unsigned int numStates = mdp->getNumStates();
@@ -180,7 +179,7 @@ vector<double> getExpectedReturnVector(  MDP* mdp)
 
 //uses an analogue to policy evaluation to calculate the expected features for each state
 //runs until change is less than eps
-double** calculateStateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureGridMDP* fmdp, double eps)
+double** calculateStateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureMDP* fmdp, double eps)
 {
     unsigned int numStates = fmdp->getNumStates();
     unsigned int numFeatures = fmdp->getNumFeatures();
@@ -271,7 +270,7 @@ double** calculateStateExpectedFeatureCounts(vector<unsigned int> & policy, Feat
 //uses an analogue to policy evaluation to calculate the expected features for each state
 //runs until change is less than eps
 ///Stochastic policy version!!!
-double** calculateStateExpectedFeatureCounts(vector<vector<double> > & policy, FeatureGridMDP* fmdp, double eps)
+double** calculateStateExpectedFeatureCounts(vector<vector<double> > & policy, FeatureMDP* fmdp, double eps)
 {
     unsigned int numStates = fmdp->getNumStates();
     unsigned int numActions = fmdp->getNumActions();
@@ -363,7 +362,7 @@ double** calculateStateExpectedFeatureCounts(vector<vector<double> > & policy, F
 
 
 
-double* calculateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureGridMDP* fmdp, double eps)
+double* calculateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureMDP* fmdp, double eps)
 {
     //average over initial state distribution (assumes all initial states equally likely)
     double** stateFcounts = calculateStateExpectedFeatureCounts(policy, fmdp, eps);
@@ -395,7 +394,7 @@ double* calculateExpectedFeatureCounts(vector<unsigned int> & policy, FeatureGri
 
 }
 
-double* calculateEmpiricalExpectedFeatureCounts(vector<vector<pair<unsigned int,unsigned int> > > trajectories, FeatureGridMDP* fmdp)
+double* calculateEmpiricalExpectedFeatureCounts(vector<vector<pair<unsigned int,unsigned int> > > trajectories, FeatureMDP* fmdp)
 {
     unsigned int numFeatures = fmdp->getNumFeatures();
     double gamma = fmdp->getDiscount();
@@ -428,7 +427,7 @@ double* calculateEmpiricalExpectedFeatureCounts(vector<vector<pair<unsigned int,
 
 
 //calculate based on demos and policy and take infintity norm of difference
-double calculateWorstCaseFeatureCountBound(vector<unsigned int> & policy, FeatureGridMDP* fmdp, vector<vector<pair<unsigned int,unsigned int> > > trajectories, double eps)
+double calculateWorstCaseFeatureCountBound(vector<unsigned int> & policy, FeatureMDP* fmdp, vector<vector<pair<unsigned int,unsigned int> > > trajectories, double eps)
 {
     unsigned int numFeatures = fmdp -> getNumFeatures();
     double* muhat_star = calculateEmpiricalExpectedFeatureCounts(trajectories,
@@ -446,6 +445,20 @@ double calculateWorstCaseFeatureCountBound(vector<unsigned int> & policy, Featur
     delete[] muhat_star;
     delete[] mu_pieval;     
     return maxAbsDiff;
+}
+
+
+double getPolicyLoss(FeatureMDP* sampleMDP, vector<unsigned int> & eval_pi, double precision)
+{
+
+    double Vstar = getExpectedReturn(sampleMDP);
+    //cout << "True Exp Val" << endl;
+    //cout << Vstar << endl;
+    //cout << "Eval Policy" << endl; 
+    double Vhat = evaluateExpectedReturn(eval_pi, sampleMDP, precision);
+    //cout << Vhat << endl;
+    return Vstar - Vhat;
+
 }
 
 
