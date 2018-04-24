@@ -13,8 +13,8 @@ from hlpr_manipulation_utils.arm_moveit2 import *
 from hlpr_manipulation_utils.manipulator import Gripper
 from add_collision_objects import *
 
-GRID_WORLD_WIDTH = 5
-GRID_WORLD_HEIGHT = 5
+GRID_WORLD_WIDTH = 6
+GRID_WORLD_HEIGHT = 4
 
 ACTIONS = {'UP':0, 'DOWN':1, 'LEFT':2, 'RIGHT':3, 'STAY':4 }
 
@@ -96,13 +96,14 @@ def update_marker_pose(data):
 
 def get_state_center(state):
     global x_side, y_side, num_states
-    x = (state//GRID_WORLD_WIDTH)*x_side+x_side/2
-    y = (state%GRID_WORLD_WIDTH)*y_side+y_side/2
+    x = (GRID_WORLD_HEIGHT - state//GRID_WORLD_WIDTH)*x_side - x_side
+    y = (GRID_WORLD_WIDTH-state%GRID_WORLD_WIDTH)*y_side - y_side
     return (x,y)
 
 def get_state(x,y):
     global x_side, y_side, num_states
-    state = num_states - 1 - (math.floor(x/x_side)*GRID_WORLD_WIDTH + math.floor(y/y_side))
+    print("x=",x,", y=",y)
+    state = num_states - 1 - (math.floor(x/x_side+0.5)*GRID_WORLD_WIDTH + math.floor(y/y_side+0.5))
     return state
 
 def distance2D(point1, point2):
@@ -120,13 +121,13 @@ def construct_world():
     global frames_client, x_side, y_side, num_states, features
     rospy.sleep(1.0)
     printed = False
-    while not (0 in markers and 1 in markers and 4 in markers):
+    while not (0 in markers):
         if not printed:
-            rospy.loginfo("Waiting for markers 0,1 and 4 ...")
+            rospy.loginfo("Waiting for marker 0 ...")
             printed = True
     rospy.loginfo("Constructing working environment ...")
-    width = distance(markers[0],markers[4])
-    height = distance(markers[0], markers[1])
+    width = 0.5  #distance(markers[0],markers[4])
+    height = 0.3 #distance(markers[0], markers[1])
     rospy.loginfo("workspace size:"+str(width)+" " +str(height))
     x_side = height / (GRID_WORLD_HEIGHT - 1)
     y_side = width / (GRID_WORLD_WIDTH - 1)
@@ -150,8 +151,8 @@ def construct_world():
     poses = []
     for frame in range(num_states):
         pose = Pose()
-        pose.position.x = pt.pose.position.x - 0.05 + x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
-        pose.position.y = pt.pose.position.y + 0.03 + y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
+        pose.position.x = pt.pose.position.x + x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
+        pose.position.y = pt.pose.position.y + y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
         pose.position.z = pt.pose.position.z + 0.03
         pose.orientation.w = 1
         poses.append(pose)
@@ -160,32 +161,34 @@ def construct_world():
     if tf_res is False:
         rospy.logerr("Update failed")
         return False
+
+    raw_input('Workspace constructed, press Enter to continue extracting features...')
     rospy.loginfo('Detecting Features ...')
-    
     printed = False
-    while not (8 in markers):
+    while not (8 in markers): #target
         if not printed:
             rospy.loginfo("Waiting for marker 8 ...")
             printed = True
-    black_transform = tfBuffer.lookup_transform('ar_marker_0','black',rospy.Time(0), rospy.Duration(1.0))
+
+    black_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'black',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
     ps.header.frame_id = 'black'
     pt = tf2_geometry_msgs.do_transform_pose(ps, black_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'ar_marker_0'
+    pt.header.frame_id = 'state_23'
     black_x = pt.pose.position.x
     black_y = pt.pose.position.y
     black_state = get_state(black_x,black_y)
     rospy.loginfo('Balck center state: '+str(black_state))
     
-    target_transform = tfBuffer.lookup_transform('ar_marker_0','ar_marker_8',rospy.Time(0), rospy.Duration(1.0))
+    target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'ar_marker_8',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
     ps.header.frame_id = 'ar_marker_8'
     pt = tf2_geometry_msgs.do_transform_pose(ps, target_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'ar_marker_0'
+    pt.header.frame_id = 'state_23'
     target_x = pt.pose.position.x
     target_y = pt.pose.position.y
     target_state = get_state(target_x,target_y)
@@ -235,9 +238,9 @@ def point_at_state(state):
     pt.pose.orientation.y = 0.692
     pt.pose.orientation.z = 0.065
     pt.pose.orientation.w = 0.719
-    pt.pose.position.z += 0.25
+    pt.pose.position.z += 0.18
     arm.move_to_ee_pose(pt)
-    rospy.sleep(5)
+    rospy.sleep(3)
 
 def move_to_state(state):
     global arm
@@ -283,7 +286,7 @@ def acitve_var_learning_agent():
         rospy.logerr("Failed to construct environment")
         return 
     
-    for state in range(25):        
+    for state in range(24):        
         print(state)
         point_at_state(state)
         gripper.open(100)
