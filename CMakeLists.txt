@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   tf
   tf_conversions
+  hlpr_manipulation_utils
 )
 
 ## System dependencies are found with CMake's conventions

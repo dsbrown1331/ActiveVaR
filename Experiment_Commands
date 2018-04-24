@@ -1,0 +1,11 @@
+roslaunch hlpr_bringup customize_start_robot_services.launch
+rosservice call /right_arm_driver/in/start_force_control
+
+
+roslaunch active_var active_var_test.launch
+rosrun active_var learning_agent.py
+
+
+
+
+

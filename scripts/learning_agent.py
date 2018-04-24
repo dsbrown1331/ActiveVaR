@@ -9,6 +9,9 @@ import tf
 import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import Pose
+from hlpr_manipulation_utils.arm_moveit2 import *
+from hlpr_manipulation_utils.manipulator import Gripper
+from add_collision_objects import *
 
 GRID_WORLD_WIDTH = 5
 GRID_WORLD_HEIGHT = 5
@@ -24,6 +27,8 @@ tfBuffer = tf2_ros.Buffer()
 listener=tf2_ros.TransformListener(tfBuffer)
 features = {} # [is_goal[marker8], is_init[purple], is_black[black]]
 
+arm = ArmMoveIt(planning_frame='linear_actuator_link', _arm_name='right')
+gripper = Gripper(prefix='right')
 
 def collect_visual_demo(typed=False):
     rospy.loginfo("Collecting visual demonstrations")
@@ -127,7 +132,15 @@ def construct_world():
     y_side = width / (GRID_WORLD_WIDTH - 1)
     rospy.loginfo("cell size:"+str(x_side)+" "+str(y_side))
     num_states = GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT
-    parent_frames = ["ar_marker_0"]*num_states
+    #parent_frames = ["ar_marker_0"]*num_states
+    marker0_transform = tfBuffer.lookup_transform('linear_actuator_link','ar_marker_0',rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    pt = tf2_geometry_msgs.do_transform_pose(ps, marker0_transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+
+    parent_frames = ["linear_actuator_link"]*num_states
     tf_frames_request = BroadcastObjectFramesRequest()
     tf_frames_request.parent_frames = parent_frames
     child_frames = []
@@ -137,8 +150,9 @@ def construct_world():
     poses = []
     for frame in range(num_states):
         pose = Pose()
-        pose.position.x = x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
-        pose.position.y = y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
+        pose.position.x = pt.pose.position.x - 0.05 + x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
+        pose.position.y = pt.pose.position.y + 0.03 + y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
+        pose.position.z = pt.pose.position.z + 0.03
         pose.orientation.w = 1
         poses.append(pose)
     tf_frames_request.poses = poses
@@ -188,38 +202,116 @@ def construct_world():
     rospy.loginfo('Redeay to collect visual demos')
     return True
 
+def grasp_cup():
+    global arm
+    transform = tfBuffer.lookup_transform('linear_actuator_link','purple',rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    ps.header.frame_id = 'purple'
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+    pt.pose.orientation.x = 0.0
+    pt.pose.orientation.y = 0.0
+    pt.pose.orientation.z = 0.0
+    pt.pose.orientation.w = 1
+    pt.pose.position.z += 0.05
+    pt.pose.position.x -= 0.15
+
+    arm.move_to_ee_pose(pt)
+    rospy.sleep(3)
+
+def point_at_state(state):
+    global arm, gripper
+    gripper.close(100)
+    transform = tfBuffer.lookup_transform('linear_actuator_link','state_'+str(state),rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    ps.header.frame_id = 'state_'+str(state)
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+    pt.pose.orientation.x = 0.006
+    pt.pose.orientation.y = 0.692
+    pt.pose.orientation.z = 0.065
+    pt.pose.orientation.w = 0.719
+    pt.pose.position.z += 0.25
+    arm.move_to_ee_pose(pt)
+    rospy.sleep(5)
+
+def move_to_state(state):
+    global arm
+    transform = tfBuffer.lookup_transform('linear_actuator_link','state_'+str(state),rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    ps.header.frame_id = 'purple'
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+    pt.pose.orientation.w = 1.0
+    pt.pose.orientation.x = 0.0
+    pt.pose.orientation.y = 0.0
+    pt.pose.orientation.z = 0.0
+    pt.pose.position.z += 0.1
+    arm.move_to_ee_pose(pt)
+    rospy.sleep(3)
+
+
+def arm_homing():
+    global arm
+    jointTarget = [0.947, 5.015, 4.95, 1.144, 11.425, 4.870, 7.281]
+    arm.move_to_joint_pose(jointTarget)
+    rospy.sleep(3)
+
 def acitve_var_learning_agent():
-    global frames_client, features
+    global frames_client, features, arm
     rospy.init_node('acitve_var_learning_agent')
+
+    env = collision_objects()
+    env.publish_collision_objects()
+    
+    arm_homing()
+
     rospy.Subscriber("ar_pose_marker", AlvarMarkers, update_marker_pose)
     rospy.wait_for_service('broadcast_object_frames')
     frames_client = rospy.ServiceProxy("broadcast_object_frames", BroadcastObjectFrames)
     rospy.wait_for_service('active_var')
     active_var_client = rospy.ServiceProxy("active_var", ActiveVaRQuery )
+
     
     if not construct_world():
         rospy.logerr("Failed to construct environment")
         return 
-        
+    
+    for state in range(25):        
+        print(state)
+        point_at_state(state)
+        gripper.open(100)
+
+    arm_homing()
+
     rospy.loginfo('Redeay to collect visual demos')
     iteration = 0
     while True:
-		demos = collect_visual_demo(typed=True)
-		active_var_request = ActiveVaRQueryRequest()
-		active_var_request.width = GRID_WORLD_WIDTH
-		active_var_request.height = GRID_WORLD_HEIGHT
-		active_var_request.num_features = 3
-		active_var_request.discount = 0.95
-		active_var_request.confidence = 50 
-		active_var_request.initial_states = [0,4,19,20]
-		active_var_request.terminal_states = []
-		active_var_request.alpha = 0.95
-		active_var_request.epsilon = 0.05
-		active_var_request.delta = 0.1
-		active_var_request.state_features = [FloatVector(features[i]) for i in range(GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT)]
-		response = active_var_client(active_var_request)
-		iteration += 1
-		print "Iteration",iteration, " query:", response.query_state
+        demos = collect_visual_demo(typed=True)
+        active_var_request = ActiveVaRQueryRequest()
+        active_var_request.width = GRID_WORLD_WIDTH
+        active_var_request.height = GRID_WORLD_HEIGHT
+        active_var_request.num_features = 3
+        active_var_request.discount = 0.95
+        active_var_request.confidence = 50 
+        active_var_request.initial_states = [0,4,19,20]
+        active_var_request.terminal_states = []
+        active_var_request.alpha = 0.95
+        active_var_request.epsilon = 0.05
+        active_var_request.delta = 0.1
+        active_var_request.state_features = [FloatVector(features[i]) for i in range(GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT)]
+        response = active_var_client(active_var_request)
+        iteration += 1
+        print "Iteration",iteration, " query:", response.query_state
+        point_at_state(response.query_state)
+        gripper.open(100)
+        arm_homing()
 
 if __name__ == "__main__":
     acitve_var_learning_agent()
