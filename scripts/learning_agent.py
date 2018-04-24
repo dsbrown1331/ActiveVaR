@@ -30,6 +30,18 @@ features = {} # [is_goal[marker8], is_init[purple], is_black[black]]
 arm = ArmMoveIt(planning_frame='linear_actuator_link', _arm_name='right')
 gripper = Gripper(prefix='right')
 
+def get_next_state(state, action):
+    next_state = state
+    if action == ACTIONS['UP']:
+        next_state = state - GRID_WORLD_WIDTH
+    if action == ACTIONS['DOWN']:
+        next_state = state + GRID_WORLD_WIDTH
+    if action == ACTIONS['LEFT']:
+        next_state = state - 1
+    if action == ACTIONS['RIGHT']:
+        next_state = state + 1
+    return next_state
+
 def collect_visual_demo(typed=False):
     rospy.loginfo("Collecting visual demonstrations")
     states = []
@@ -79,6 +91,7 @@ def collect_visual_demo(typed=False):
     		actions.append(-1)
     		print("[ERROR finding action] state:",states[i+1],"is not right next to",states[i])
     		
+    print "demos:",states,actions
     return [(states[i], actions[i]) for i in range(len(actions))]
 
 def update_marker_pose(data):
@@ -103,8 +116,9 @@ def get_state_center(state):
 def get_state(x,y):
     global x_side, y_side, num_states
     print("x=",x,", y=",y)
-    state = num_states - 1 - (math.floor(x/x_side+0.5)*GRID_WORLD_WIDTH + math.floor(y/y_side+0.5))
-    return state
+    state = num_states - 1 - (int(math.floor(2*(x+x_side/2)/x_side))//2*GRID_WORLD_WIDTH 
+                                + int(math.floor(2*(y+y_side/2)/y_side))//2)
+    return int(state)
 
 def distance2D(point1, point2):
     return math.sqrt((point1[0]-point2[0])**2+(point1[1]-point2[1])**2)
@@ -176,11 +190,11 @@ def construct_world():
     ps.header.frame_id = 'black'
     pt = tf2_geometry_msgs.do_transform_pose(ps, black_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'state_23'
+    pt.header.frame_id = 'state_'+str(num_states-1)
     black_x = pt.pose.position.x
     black_y = pt.pose.position.y
     black_state = get_state(black_x,black_y)
-    rospy.loginfo('Balck center state: '+str(black_state))
+    rospy.loginfo('---> Balck center state: '+str(black_state))
     
     target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'ar_marker_8',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
@@ -188,26 +202,38 @@ def construct_world():
     ps.header.frame_id = 'ar_marker_8'
     pt = tf2_geometry_msgs.do_transform_pose(ps, target_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'state_23'
+    pt.header.frame_id = 'state_'+str(num_states-1)
     target_x = pt.pose.position.x
     target_y = pt.pose.position.y
     target_state = get_state(target_x,target_y)
 
-    rospy.loginfo('Target state: '+str(target_state))
+    rospy.loginfo('---> Target state: '+str(target_state))
     
     for state_i in range(GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT):
-        features[state_i] = [0.0,0.0,0.0]
+        features[state_i] = [1.0,0.0,0.0]
         state_center = get_state_center(state_i)
-        if distance2D(state_center, (black_x,black_y)) < 0.06:
+        if distance2D(state_center, (black_x,black_y)) < 0.1:
              features[state_i][2] = 1.0
+    features[target_state][1] = 1.0
     features[target_state][0] = 1.0
     	
     rospy.loginfo('Redeay to collect visual demos')
     return True
 
 def grasp_cup():
-    global arm
-    transform = tfBuffer.lookup_transform('linear_actuator_link','purple',rospy.Time(0), rospy.Duration(1.0))
+    global arm, gripper
+    target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'purple',rospy.Time(0), rospy.Duration(15.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    ps.header.frame_id = 'purple'
+    pt = tf2_geometry_msgs.do_transform_pose(ps, target_transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'state_'+str(num_states-1)
+    target_x = pt.pose.position.x
+    target_y = pt.pose.position.y
+    cup_state = get_state(target_x,target_y)
+
+    transform = tfBuffer.lookup_transform('linear_actuator_link','purple',rospy.Time(0), rospy.Duration(15.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
     ps.header.frame_id = 'purple'
@@ -218,11 +244,15 @@ def grasp_cup():
     pt.pose.orientation.y = 0.0
     pt.pose.orientation.z = 0.0
     pt.pose.orientation.w = 1
-    pt.pose.position.z += 0.05
+    pt.pose.position.z += 0.1
     pt.pose.position.x -= 0.15
-
     arm.move_to_ee_pose(pt)
     rospy.sleep(3)
+    pt.pose.position.x += 0.05
+    arm.move_to_ee_pose(pt)
+    rospy.sleep(3)
+    gripper.close(100)
+    return cup_state
 
 def point_at_state(state):
     global arm, gripper
@@ -286,24 +316,25 @@ def acitve_var_learning_agent():
         rospy.logerr("Failed to construct environment")
         return 
     
-    for state in range(24):        
-        print(state)
-        point_at_state(state)
-        gripper.open(100)
-
-    arm_homing()
-
     rospy.loginfo('Redeay to collect visual demos')
     iteration = 0
+    demonstrations = []
+    init_states = [6,17,19,22]
     while True:
         demos = collect_visual_demo(typed=True)
+        for demo in demos:
+            sa = StateAction()
+            sa.state = demo[0]
+            sa.action = demo[1]
+            demonstrations.append(sa)
         active_var_request = ActiveVaRQueryRequest()
+        active_var_request.demonstration = demonstrations
         active_var_request.width = GRID_WORLD_WIDTH
         active_var_request.height = GRID_WORLD_HEIGHT
         active_var_request.num_features = 3
         active_var_request.discount = 0.95
         active_var_request.confidence = 50 
-        active_var_request.initial_states = [0,4,19,20]
+        active_var_request.initial_states = init_states
         active_var_request.terminal_states = []
         active_var_request.alpha = 0.95
         active_var_request.epsilon = 0.05
@@ -311,6 +342,18 @@ def acitve_var_learning_agent():
         active_var_request.state_features = [FloatVector(features[i]) for i in range(GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT)]
         response = active_var_client(active_var_request)
         iteration += 1
+        # execute current policy
+        curr_policy = response.policy
+        raw_input('Ready to execute current policy, press Enter to continue...')
+        cup_state = grasp_cup()
+        move_to_state(cup_state)
+        while curr_policy[cup_state] != ACTIONS['STAY']:
+            cup_state = get_next_state(cup_state,curr_policy[cup_state])
+            print "moving to state ", cup_state
+            move_to_state(cup_state)
+        gripper.open(100)
+        arm_homing()
+        
         print "Iteration",iteration, " query:", response.query_state
         point_at_state(response.query_state)
         gripper.open(100)
