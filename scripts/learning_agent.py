@@ -12,6 +12,7 @@ from geometry_msgs.msg import Pose
 from hlpr_manipulation_utils.arm_moveit2 import *
 from hlpr_manipulation_utils.manipulator import Gripper
 from add_collision_objects import *
+from copy import deepcopy
 
 GRID_WORLD_WIDTH = 6
 GRID_WORLD_HEIGHT = 4
@@ -40,6 +41,8 @@ def get_next_state(state, action):
         next_state = state - 1
     if action == ACTIONS['RIGHT']:
         next_state = state + 1
+    if next_state < 0 or next_state >= GRID_WORLD_WIDTH * GRID_WORLD_HEIGHT:
+        return None
     return next_state
 
 def collect_visual_demo(typed=False):
@@ -212,7 +215,7 @@ def construct_world():
     for state_i in range(GRID_WORLD_WIDTH*GRID_WORLD_HEIGHT):
         features[state_i] = [1.0,0.0,0.0]
         state_center = get_state_center(state_i)
-        if distance2D(state_center, (black_x,black_y)) < 0.1:
+        if distance2D(state_center, (black_x,black_y)) < 0.15:
              features[state_i][2] = 1.0
     features[target_state][1] = 1.0
     features[target_state][0] = 1.0
@@ -222,6 +225,7 @@ def construct_world():
 
 def grasp_cup():
     global arm, gripper
+    gripper.open(100)
     target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'purple',rospy.Time(0), rospy.Duration(15.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
@@ -244,13 +248,16 @@ def grasp_cup():
     pt.pose.orientation.y = 0.0
     pt.pose.orientation.z = 0.0
     pt.pose.orientation.w = 1
-    pt.pose.position.z += 0.1
+    pt.pose.position.z += 0.02
     pt.pose.position.x -= 0.15
-    arm.move_to_ee_pose(pt)
+    waypoints = []
+    waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x += 0.10
+    waypoints.append(deepcopy(pt.pose))
+    (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
     rospy.sleep(3)
-    pt.pose.position.x += 0.05
-    arm.move_to_ee_pose(pt)
-    rospy.sleep(3)
+    succeeded = arm.group[0].execute(plan)
+    rospy.sleep(5)
     gripper.close(100)
     return cup_state
 
@@ -277,7 +284,6 @@ def move_to_state(state):
     transform = tfBuffer.lookup_transform('linear_actuator_link','state_'+str(state),rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
-    ps.header.frame_id = 'purple'
     pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
     pt.header.stamp = rospy.Time.now()
     pt.header.frame_id = 'linear_actuator_link'
@@ -289,6 +295,27 @@ def move_to_state(state):
     arm.move_to_ee_pose(pt)
     rospy.sleep(3)
 
+def move_through_states(states):
+    global arm
+    waypoints = []
+    for state in states:
+        transform = tfBuffer.lookup_transform('linear_actuator_link','state_'+str(state),rospy.Time(0), rospy.Duration(1.0))
+        ps = geometry_msgs.msg.PoseStamped()
+        ps.header.stamp = rospy.Time.now()
+        pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+        pt.header.stamp = rospy.Time.now()
+        pt.header.frame_id = 'linear_actuator_link'
+        pt.pose.orientation.w = 1.0
+        pt.pose.orientation.x = 0.0
+        pt.pose.orientation.y = 0.0
+        pt.pose.orientation.z = 0.0
+        pt.pose.position.z += 0.1
+        waypoints.append(deepcopy(pt.pose))
+    (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
+    
+    succeeded = arm.group[0].execute(plan)
+    rospy.sleep(3)
+    return succeeded
 
 def arm_homing():
     global arm
@@ -316,10 +343,11 @@ def acitve_var_learning_agent():
         rospy.logerr("Failed to construct environment")
         return 
     
+    
     rospy.loginfo('Redeay to collect visual demos')
     iteration = 0
     demonstrations = []
-    init_states = [6,17,19,22]
+    init_states = [0,1,2,3,4,5,6,11,12,17]
     while True:
         demos = collect_visual_demo(typed=True)
         for demo in demos:
@@ -346,18 +374,24 @@ def acitve_var_learning_agent():
         curr_policy = response.policy
         raw_input('Ready to execute current policy, press Enter to continue...')
         cup_state = grasp_cup()
-        move_to_state(cup_state)
-        while curr_policy[cup_state] != ACTIONS['STAY']:
+        #move_to_state(cup_state)
+        state_waypoints = [cup_state]
+        traj_length = 0
+        while curr_policy[cup_state] != ACTIONS['STAY'] and traj_length < 8:
             cup_state = get_next_state(cup_state,curr_policy[cup_state])
-            print "moving to state ", cup_state
-            move_to_state(cup_state)
+            print "next state ", cup_state
+            state_waypoints.append(cup_state)
+            traj_length += 1
+        move_through_states(state_waypoints)
         gripper.open(100)
         arm_homing()
         
-        print "Iteration",iteration, " query:", response.query_state
+        print "Iteration", iteration, " query:", response.query_state
         point_at_state(response.query_state)
         gripper.open(100)
         arm_homing()
+        
+    arm_homing()
 
 if __name__ == "__main__":
     acitve_var_learning_agent()
