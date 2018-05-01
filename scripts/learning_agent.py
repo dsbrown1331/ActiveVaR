@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from subprocess import call
 from hlpr_single_plane_segmentation.srv import *
 from ar_track_alvar_msgs.msg import AlvarMarkers
 from active_var.msg import *
@@ -15,7 +16,7 @@ from add_collision_objects import *
 from copy import deepcopy
 
 GRID_WORLD_WIDTH = 6
-GRID_WORLD_HEIGHT = 4
+GRID_WORLD_HEIGHT = 5
 
 ACTIONS = {'UP':0, 'DOWN':1, 'LEFT':2, 'RIGHT':3, 'STAY':4 }
 
@@ -144,7 +145,7 @@ def construct_world():
             printed = True
     rospy.loginfo("Constructing working environment ...")
     width = 0.5  #distance(markers[0],markers[4])
-    height = 0.3 #distance(markers[0], markers[1])
+    height = 0.4 #distance(markers[0], markers[1])
     rospy.loginfo("workspace size:"+str(width)+" " +str(height))
     x_side = height / (GRID_WORLD_HEIGHT - 1)
     y_side = width / (GRID_WORLD_WIDTH - 1)
@@ -247,23 +248,25 @@ def grasp_cup():
     pt.pose.orientation.x = 0.0
     pt.pose.orientation.y = 0.0
     pt.pose.orientation.z = 0.0
-    pt.pose.orientation.w = 1
-    pt.pose.position.z += 0.02
-    pt.pose.position.x -= 0.15
+    pt.pose.orientation.w = 1.0
     waypoints = []
+    pt.pose.position.x -= 0.15
+    pt.pose.position.z += 0.01
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.x += 0.10
+    pt.pose.position.x += 0.15
     waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x += 0.15
+    waypoints.append(deepcopy(pt.pose))
+    arm.set_start_state(None)
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
-    rospy.sleep(3)
+    rospy.sleep(2)
     succeeded = arm.group[0].execute(plan)
-    rospy.sleep(5)
+    rospy.sleep(2)
     gripper.close(100)
     return cup_state
 
 def point_at_state(state):
     global arm, gripper
-    gripper.close(100)
     transform = tfBuffer.lookup_transform('linear_actuator_link','state_'+str(state),rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
@@ -277,7 +280,8 @@ def point_at_state(state):
     pt.pose.orientation.w = 0.719
     pt.pose.position.z += 0.18
     arm.move_to_ee_pose(pt)
-    rospy.sleep(3)
+    gripper.close(100)
+    rospy.sleep(2)
 
 def move_to_state(state):
     global arm
@@ -295,7 +299,7 @@ def move_to_state(state):
     arm.move_to_ee_pose(pt)
     rospy.sleep(3)
 
-def move_through_states(states):
+def move_through_states(states, home_pose):
     global arm
     waypoints = []
     for state in states:
@@ -310,11 +314,14 @@ def move_through_states(states):
         pt.pose.orientation.y = 0.0
         pt.pose.orientation.z = 0.0
         pt.pose.position.z += 0.1
+        pt.pose.position.x -= 0.1
         waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.z -= 0.04
+    waypoints.append(deepcopy(pt.pose))
+    arm.set_start_state(None)
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
-    
-    succeeded = arm.group[0].execute(plan)
     rospy.sleep(3)
+    succeeded = arm.group[0].execute(plan)
     return succeeded
 
 def arm_homing():
@@ -322,6 +329,17 @@ def arm_homing():
     jointTarget = [0.947, 5.015, 4.95, 1.144, 11.425, 4.870, 7.281]
     arm.move_to_joint_pose(jointTarget)
     rospy.sleep(3)
+    transform = tfBuffer.lookup_transform('linear_actuator_link','right_ee_link',rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.pose.orientation.w = 1.0
+    pt.pose.orientation.x = 0.0
+    pt.pose.orientation.y = 0.0
+    pt.pose.orientation.z = 0.0
+    pt.pose.position.z += 0.1
+    return pt.pose
+
 
 def acitve_var_learning_agent():
     global frames_client, features, arm
@@ -330,7 +348,7 @@ def acitve_var_learning_agent():
     env = collision_objects()
     env.publish_collision_objects()
     
-    arm_homing()
+    home_pose = arm_homing()
 
     rospy.Subscriber("ar_pose_marker", AlvarMarkers, update_marker_pose)
     rospy.wait_for_service('broadcast_object_frames')
@@ -347,7 +365,7 @@ def acitve_var_learning_agent():
     rospy.loginfo('Redeay to collect visual demos')
     iteration = 0
     demonstrations = []
-    init_states = [0,1,2,3,4,5,6,11,12,17]
+    init_states = [7,8,9,10,12,17,18,23,25,26,27]
     while True:
         demos = collect_visual_demo(typed=True)
         for demo in demos:
@@ -374,7 +392,6 @@ def acitve_var_learning_agent():
         curr_policy = response.policy
         raw_input('Ready to execute current policy, press Enter to continue...')
         cup_state = grasp_cup()
-        #move_to_state(cup_state)
         state_waypoints = [cup_state]
         traj_length = 0
         while curr_policy[cup_state] != ACTIONS['STAY'] and traj_length < 8:
@@ -382,16 +399,16 @@ def acitve_var_learning_agent():
             print "next state ", cup_state
             state_waypoints.append(cup_state)
             traj_length += 1
-        move_through_states(state_waypoints)
+        move_through_states(state_waypoints, home_pose)
         gripper.open(100)
         arm_homing()
-        
         print "Iteration", iteration, " query:", response.query_state
         point_at_state(response.query_state)
+        call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.0"',shell=True)
         gripper.open(100)
+        call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.7"',shell=True)
         arm_homing()
         
-    arm_homing()
 
 if __name__ == "__main__":
     acitve_var_learning_agent()
