@@ -1,6 +1,6 @@
 <!-- Starts up everything needed to run the example listener/talker nodes. -->
 <launch>
-  <arg name="segmentation/nv" default="false" />
+  <arg name="segmentation/nv" default="true" />
   <arg name="segmentation/rt" default="/kinect/qhd/points" />
   <arg name="segmentation/v" default="340" />
   <arg name="segmentation/src" default="0" />

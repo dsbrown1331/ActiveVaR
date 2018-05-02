@@ -113,15 +113,15 @@ def update_marker_pose(data):
 
 def get_state_center(state):
     global x_side, y_side, num_states
-    x = (GRID_WORLD_HEIGHT - state//GRID_WORLD_WIDTH)*x_side - x_side
-    y = (GRID_WORLD_WIDTH-state%GRID_WORLD_WIDTH)*y_side - y_side
+    x = -(state//GRID_WORLD_WIDTH)*x_side 
+    y = -(state%GRID_WORLD_WIDTH)*y_side 
+    print state, 'center:',x,", ", y
     return (x,y)
 
 def get_state(x,y):
     global x_side, y_side, num_states
-    print("x=",x,", y=",y)
-    state = num_states - 1 - (int(math.floor(2*(x+x_side/2)/x_side))//2*GRID_WORLD_WIDTH 
-                                + int(math.floor(2*(y+y_side/2)/y_side))//2)
+    state = ((int(math.floor(2*(x_side/2-x)/x_side))//2)*GRID_WORLD_WIDTH + int(math.floor(2*(y_side/2-y)/y_side))//2)
+    print("x=",x,", y=",y, ", state=",state)
     return int(state)
 
 def distance2D(point1, point2):
@@ -169,8 +169,10 @@ def construct_world():
     poses = []
     for frame in range(num_states):
         pose = Pose()
-        pose.position.x = pt.pose.position.x + x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
-        pose.position.y = pt.pose.position.y + y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
+        #pose.position.x = pt.pose.position.x + x_side * ((num_states - 1 - frame) // GRID_WORLD_WIDTH)
+        #pose.position.y = pt.pose.position.y + y_side * ((num_states - 1 - frame) % GRID_WORLD_WIDTH)
+        pose.position.x = pt.pose.position.x - x_side * (frame // GRID_WORLD_WIDTH)
+        pose.position.y = pt.pose.position.y - y_side * (frame % GRID_WORLD_WIDTH)
         pose.position.z = pt.pose.position.z + 0.03
         pose.orientation.w = 1
         poses.append(pose)
@@ -188,25 +190,21 @@ def construct_world():
             rospy.loginfo("Waiting for marker 8 ...")
             printed = True
 
-    black_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'black',rospy.Time(0), rospy.Duration(1.0))
+    black_transform = tfBuffer.lookup_transform('state_0','black',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
-    ps.header.frame_id = 'black'
     pt = tf2_geometry_msgs.do_transform_pose(ps, black_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'state_'+str(num_states-1)
     black_x = pt.pose.position.x
     black_y = pt.pose.position.y
     black_state = get_state(black_x,black_y)
     rospy.loginfo('---> Balck center state: '+str(black_state))
     
-    target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'ar_marker_8',rospy.Time(0), rospy.Duration(1.0))
+    target_transform = tfBuffer.lookup_transform('state_0','ar_marker_8',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
-    ps.header.frame_id = 'ar_marker_8'
     pt = tf2_geometry_msgs.do_transform_pose(ps, target_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'state_'+str(num_states-1)
     target_x = pt.pose.position.x
     target_y = pt.pose.position.y
     target_state = get_state(target_x,target_y)
@@ -218,8 +216,9 @@ def construct_world():
         state_center = get_state_center(state_i)
         if distance2D(state_center, (black_x,black_y)) < 0.15:
              features[state_i][2] = 1.0
+             features[state_i][0] = 0.0
     features[target_state][1] = 1.0
-    features[target_state][0] = 1.0
+    features[target_state][0] = 0.0
     	
     rospy.loginfo('Redeay to collect visual demos')
     return True
@@ -227,21 +226,21 @@ def construct_world():
 def grasp_cup():
     global arm, gripper
     gripper.open(100)
-    target_transform = tfBuffer.lookup_transform('state_'+str(num_states-1),'purple',rospy.Time(0), rospy.Duration(15.0))
+    target_transform = tfBuffer.lookup_transform('state_0','yellow',rospy.Time(0), rospy.Duration(15.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
-    ps.header.frame_id = 'purple'
+    ps.header.frame_id = 'yellow'
     pt = tf2_geometry_msgs.do_transform_pose(ps, target_transform)
     pt.header.stamp = rospy.Time.now()
-    pt.header.frame_id = 'state_'+str(num_states-1)
+    pt.header.frame_id = 'state_0'
     target_x = pt.pose.position.x
     target_y = pt.pose.position.y
     cup_state = get_state(target_x,target_y)
 
-    transform = tfBuffer.lookup_transform('linear_actuator_link','purple',rospy.Time(0), rospy.Duration(15.0))
+    transform = tfBuffer.lookup_transform('linear_actuator_link','yellow',rospy.Time(0), rospy.Duration(15.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
-    ps.header.frame_id = 'purple'
+    ps.header.frame_id = 'yellow'
     pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
     pt.header.stamp = rospy.Time.now()
     pt.header.frame_id = 'linear_actuator_link'
@@ -250,19 +249,19 @@ def grasp_cup():
     pt.pose.orientation.z = 0.0
     pt.pose.orientation.w = 1.0
     waypoints = []
-    pt.pose.position.x -= 0.15
-    pt.pose.position.z += 0.01
+    pt.pose.position.x -= 0.2
+    pt.pose.position.z -= 0.1
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.x += 0.15
+    pt.pose.position.x += 0.1
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.x += 0.15
+    pt.pose.position.x += 0.06
     waypoints.append(deepcopy(pt.pose))
     arm.set_start_state(None)
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
     rospy.sleep(2)
     succeeded = arm.group[0].execute(plan)
     rospy.sleep(2)
-    gripper.close(100)
+    gripper.close(force=5)
     return cup_state
 
 def point_at_state(state):
@@ -279,8 +278,17 @@ def point_at_state(state):
     pt.pose.orientation.z = 0.065
     pt.pose.orientation.w = 0.719
     pt.pose.position.z += 0.18
-    arm.move_to_ee_pose(pt)
+    waypoints = []
+    waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.z -= 0.1
+    waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.z += 0.1
+    waypoints.append(deepcopy(pt.pose))
     gripper.close(100)
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
     rospy.sleep(2)
 
 def move_to_state(state):
@@ -295,7 +303,8 @@ def move_to_state(state):
     pt.pose.orientation.x = 0.0
     pt.pose.orientation.y = 0.0
     pt.pose.orientation.z = 0.0
-    pt.pose.position.z += 0.1
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.15
     arm.move_to_ee_pose(pt)
     rospy.sleep(3)
 
@@ -313,15 +322,16 @@ def move_through_states(states, home_pose):
         pt.pose.orientation.x = 0.0
         pt.pose.orientation.y = 0.0
         pt.pose.orientation.z = 0.0
-        pt.pose.position.z += 0.1
+        pt.pose.position.z += 0.01
         pt.pose.position.x -= 0.1
         waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.z -= 0.04
+    pt.pose.position.z -= 0.05
     waypoints.append(deepcopy(pt.pose))
     arm.set_start_state(None)
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
-    rospy.sleep(3)
+    rospy.sleep(2)
     succeeded = arm.group[0].execute(plan)
+    rospy.sleep(2)
     return succeeded
 
 def arm_homing():
@@ -361,11 +371,10 @@ def acitve_var_learning_agent():
         rospy.logerr("Failed to construct environment")
         return 
     
-    
     rospy.loginfo('Redeay to collect visual demos')
     iteration = 0
     demonstrations = []
-    init_states = [7,8,9,10,12,17,18,23,25,26,27]
+    init_states = [7,8,9,10,12,13,14,15,16,17,18,23,25,26,27,28]
     while True:
         demos = collect_visual_demo(typed=True)
         for demo in demos:
@@ -401,6 +410,7 @@ def acitve_var_learning_agent():
             traj_length += 1
         move_through_states(state_waypoints, home_pose)
         gripper.open(100)
+        move_to_state(state_waypoints[-1])
         arm_homing()
         print "Iteration", iteration, " query:", response.query_state
         point_at_state(response.query_state)
