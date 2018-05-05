@@ -48,9 +48,9 @@ class collision_objects:
       
         p = PoseStamped()
         p.header.frame_id = "base_link"
-        p.pose.position.x = 1.2 
+        p.pose.position.x = 1.1 
         p.pose.position.y = 0.15
-        p.pose.position.z = 0.43 
+        p.pose.position.z = 0.40 
         p.pose.orientation.w = 0.0
         self.scene.add_box("table_box",p,(0.7, 1.5, 0.75))
      
