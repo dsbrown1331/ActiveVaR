@@ -336,9 +336,12 @@ def move_through_states(states, home_pose):
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
     rospy.sleep(2)
     succeeded = arm.group[0].execute(plan)
-    rospy.sleep(2)
+    print "Trajectory execution result: ", succeeded
+    rospy.sleep(5)
     gripper.open(100)
-
+    
+    # Retract arm
+    rospy.sleep(5)
     new_waypoints = []
     new_waypoints.append(deepcopy(pt.pose))
     pt.pose.position.x -= 0.1
@@ -413,7 +416,7 @@ def acitve_var_learning_agent():
         active_var_request.height = GRID_WORLD_HEIGHT
         active_var_request.num_features = 3
         active_var_request.discount = 0.95
-        active_var_request.confidence = 50 
+        active_var_request.confidence = 100 
         active_var_request.initial_states = init_states
         active_var_request.terminal_states = []
         active_var_request.alpha = 0.95
@@ -438,12 +441,17 @@ def acitve_var_learning_agent():
             traj_length += 1
         move_through_states(state_waypoints, home_pose)
         arm_homing()
+        print "Status: ", response.status
+        if response.status == 'Done':
+            break
         print "Iteration", iteration, " query:", response.query_state
         point_at_state(response.query_state)
-        call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.0"',shell=True)
+        '''call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.0"',shell=True)
         gripper.open(100)
-        call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.7"',shell=True)
+        call('rostopic pub -1 /tilt_controller/command std_msgs/Float64 "data: 0.7"',shell=True)'''
+        gripper.open(100)
         arm_homing()
+        
         
 
 if __name__ == "__main__":

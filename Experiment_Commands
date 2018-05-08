@@ -1,8 +1,22 @@
+
+start the robot: vstart
+
 roslaunch hlpr_bringup customize_start_robot_services.launch
 rosservice call /right_arm_driver/in/start_force_control
 
+tilt_head_down
 
+on vector2: 
+cd active_var_ws/
+source devel/setup.bash
+roslaunch ar_track_alvar indiv.launch
+
+
+on vector1:
+cd active_var_ws/
+source devel/setup.bash
 roslaunch active_var active_var_test.launch
+
 rosrun active_var learning_agent.py
 
 
