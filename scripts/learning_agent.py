@@ -222,6 +222,29 @@ def construct_world():
              features[state_i][0] = 0.0
     features[target_state][1] = 1.0
     features[target_state][0] = 0.0
+    
+    #print out the feature map
+    count = 0
+    feature_string = ""
+    for i in range(GRID_WORLD_HEIGHT):
+    	for j in range(GRID_WORLD_WIDTH): 
+    		if features[count][0] == 1.0:
+    			#table feature
+    			feature_string += "t"
+    		elif features[count][1] == 1.0:
+    			#goal feature
+    			feature_string += "g"
+    		elif features[count][2] == 1.0:
+    			#plant feature
+    			feature_string += "p"
+    		feature_string += "\t"
+    		count += 1
+    	feature_string += "\n"
+    print "extracted features"
+    print "----------------"
+    print feature_string
+    	
+    	
     	
     rospy.loginfo('Redeay to collect visual demos')
     return True
@@ -402,7 +425,11 @@ def acitve_var_learning_agent():
     iteration = 0
 
     demonstrations = []
-    init_states = [7,8,9,10,11,12,13,14,15,16,17,18,23,25,26,27,28]
+    init_states = [0, 1, 2, 3, 4, 5,
+                   6, 7, 8, 9,10,11,
+                   12,13,14,15,16,17,
+                   18,19,20,21,22,23,
+                   24,25,26,27,28,29]
     while True:
         demos = collect_visual_demo(typed=True)
         for demo in demos:
