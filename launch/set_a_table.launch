@@ -1,0 +1,37 @@
+<!-- Starts up everything needed to run the example listener/talker nodes. -->
+<launch>
+  <arg name="segmentation/viz" default="false" />
+  <arg name="segmentation/nv" default="true" />
+  <arg name="segmentation/rt" default="/kinect/qhd/points" />
+  <arg name="segmentation/v" default="340" />
+  <arg name="segmentation/src" default="0" />
+  
+  <arg name="marker_size" default="7.1" />
+  <arg name="max_new_marker_error" default="0.08" />
+  <arg name="max_track_error" default="0.2" />
+
+  <arg name="cam_image_topic" default="/kinect/qhd/points" />
+  <arg name="cam_info_topic" default="/kinect/qhd/camera_info" />
+  <arg name="output_frame" default="/base_link" />
+
+   <!--node name="ar_track_alvar" pkg="ar_track_alvar" type="individualMarkers" respawn="false" output="screen">
+    <param name="marker_size"           type="double" value="$(arg marker_size)" />
+    <param name="max_new_marker_error"  type="double" value="$(arg max_new_marker_error)" />
+    <param name="max_track_error"       type="double" value="$(arg max_track_error)" />
+    <param name="output_frame"          type="string" value="$(arg output_frame)" />
+
+    <remap from="camera_image"  to="$(arg cam_image_topic)" />
+    <remap from="camera_info"   to="$(arg cam_info_topic)" />
+  </node-->
+   
+   <node name="tf_broadcaster" pkg="hlpr_single_plane_segmentation" type="tf_broadcaster.py" respawn="false" output="screen"/>
+
+  <node pkg="hlpr_single_plane_segmentation" type="sp_seg" name="sp_seg" output="screen">
+    <param name="segmentation/nv" value="$(arg segmentation/nv)" />
+    <param name="segmentation/rt" value="$(arg segmentation/rt)" />
+    <param name="segmentation/src" value="$(arg segmentation/src)" />
+    <param name="segmentation/v" value="$(arg segmentation/v)" />
+  </node>
+
+
+</launch>
