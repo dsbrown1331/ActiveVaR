@@ -15,26 +15,82 @@ from hlpr_manipulation_utils.manipulator import Gripper
 from add_collision_objects import *
 from copy import deepcopy
 import matplotlib.pyplot as plt
+from Tkinter import *
 
 markers = {}
 
 tfBuffer = tf2_ros.Buffer()       
 listener=tf2_ros.TransformListener(tfBuffer)
 
-arm = ArmMoveIt(planning_frame='linear_actuator_link', _arm_name='right')
-gripper = Gripper(prefix='right')
+
+right_arm = ArmMoveIt(planning_frame='linear_actuator_link', _arm_name='right')
+right_gripper = Gripper(prefix='right')
+
 left_arm = ArmMoveIt(planning_frame='linear_actuator_link', _arm_name='left')
 left_gripper = Gripper(prefix='left')
 
-def collect_visual_demo():
+demo_pos = (-0.2,-0.2)
+v = None
+c = None
+b = None
+p = None
+
+class SimpleGUI:
+    def __init__(self, master):
+		global demo_pos,v,c,b,p
+		self.master = master
+		master.title("User Interface for Set A Table Task")
+		m = PanedWindow(orient=VERTICAL)
+		m.pack(fill=BOTH, expand=1)
+	
+		self.label = Label(m, text="Select objects in current configuration:")
+		self.label.pack(anchor=W)
+		v = BooleanVar()
+		c = BooleanVar()
+		b = BooleanVar()
+		p = BooleanVar()
+		
+		obj_vase_button = Checkbutton(m, text="Vase", padx = 20, variable=v,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_cup_button = Checkbutton(m, text="Cup",padx = 20, variable=c,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_bowl_button = Checkbutton(m, text="Bowl",padx = 20, variable=b,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_plate_button = Checkbutton(m, text="Plate",padx = 20, variable=p,onvalue=True, offvalue=False).pack(side=LEFT)
+
+		self.home_button = Button(master, text="Home Pose", command= arm_homing)
+		self.home_button.pack(fill=X,side=BOTTOM)
+
+		self.perceive_button = Button(master, text="Perceive Table", command=construct_world)
+		self.perceive_button.pack(fill=X,side=TOP)
+
+		#self.update_button = Button(master, text="Update Goal", command=collect_visual_demo)
+		#self.update_button.pack()
+
+		self.vase_button = Button(master, text="Place Vase", command=place_vase)
+		self.vase_button.pack(fill=X,side=TOP)
+
+		self.utensil_button = Button(master, text="Place Utensil", command=put_down_utensil)
+		self.utensil_button.pack(fill=X,side=TOP)
+
+		self.plate_button = Button(master, text="Place Plate", command=put_down_plate)
+		self.plate_button.pack(fill=X,side=TOP)
+
+		self.grasp_button1 = Button(master, text="Grasp Object (Left)", command=grasp_object_left)
+		self.grasp_button1.pack(fill=X,side=TOP)
+		self.grasp_button2 = Button(master, text="Grasp Object (Right)", command=grasp_object_right)
+		self.grasp_button2.pack(fill=X,side=TOP)
+		# self.close_button = Button(master, text="Close", command=master.quit)
+		# self.close_button.pack(fill=X,side=TOP)
+
+        
+def collect_visual_demo(skip_check=False):
+	global demo_pos
 	rospy.loginfo("Collecting visual demonstration")
 	printed = False
 	while not (7 in markers):
 		if not printed:
 		    rospy.loginfo("Waiting for marker 7 ...")
 		    printed = True
-
-	raw_input('Press enter to record location')
+	if not skip_check:
+	    raw_input('Press enter to record location')
 	transform = tfBuffer.lookup_transform('table','ar_marker_7',rospy.Time(0), rospy.Duration(1.0))
 	ps = geometry_msgs.msg.PoseStamped()
 	ps.header.stamp = rospy.Time.now()
@@ -43,7 +99,7 @@ def collect_visual_demo():
 	pt.header.frame_id = 'table'
 	x = pt.pose.position.x
 	y = pt.pose.position.y	  
-				   	 
+	demo_pos = (x,y)
 	return (x,y)
 
 def update_marker_pose(data):
@@ -66,21 +122,21 @@ def distance2D(point1, point2):
 def distance(point1, point2):
     return math.sqrt((point1.x-point2.x)**2+(point1.y-point2.y)**2+(point1.z-point2.z)**2)
 
-def construct_world():
+def construct_world(objects=None):
        #      #     #     #     #     #
     #marker0             
     #
     #
     #
     #
-    global frames_client
+    global frames_client,v,c,b,p
     printed = False
     while not (0 in markers):
         if not printed:
             rospy.loginfo("Waiting for marker 0 ...")
             printed = True
     rospy.loginfo("Constructing working environment ...")
-    width = 0.6  
+    width = 0.9  
     height = 0.5 
     rospy.loginfo("workspace size:"+str(width)+" " +str(height))
    
@@ -105,9 +161,15 @@ def construct_world():
         rospy.logerr("Update failed")
         return False
 
-    raw_input('Workspace constructed, press Enter to continue extracting features...')
+    #raw_input('Workspace constructed, press Enter to continue extracting features...')
     rospy.loginfo('Detecting Features ...') 
-    objects = ["cup","bowl","plate"]
+    if not objects:
+        objects = []
+        if v.get():  objects.append("vase")
+        if c.get():  objects.append("cup")
+        if b.get():  objects.append("bowl")
+        if p.get():  objects.append("plate")
+        print objects
     object_poses = {}
 
     for obj in objects:
@@ -132,49 +194,202 @@ def construct_world():
     plt.show()
     return True
 
-def grasp_object(left=False):
-    global arm, gripper
-    if left:
-        left_gripper.close()
+def grasp_object_right():
+    global right_gripper, left_gripper
+    right_gripper.close()
+        
+def grasp_object_left():
+    global left_gripper
+    left_gripper.close()
+        
+def put_down_plate(pos=None):
+   
+    global right_arm, left_arm, right_gripper, left_gripper
+           
+    if not pos:
+        pos = collect_visual_demo(skip_check=True)
+    if pos[1] < -0.45:
+        arm = right_arm
+        gripper = right_gripper
+        ori = [0.305, 0.588, 0.389, 0.640]
+        disp = -0.08
     else:
-        gripper.close()
-
-def move_to_position(pos):
-    global arm, gripper
+        arm = left_arm
+        gripper = left_gripper
+        ori = [0.649, -0.302, -0.607, 0.346]
+        disp = 0.08
+        
     transform = tfBuffer.lookup_transform('linear_actuator_link','table',rospy.Time(0), rospy.Duration(1.0))
     ps = geometry_msgs.msg.PoseStamped()
     ps.header.stamp = rospy.Time.now()
     pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
     pt.header.stamp = rospy.Time.now()
     pt.header.frame_id = 'linear_actuator_link'
-    pt.pose.orientation.x = 0.006 
-    pt.pose.orientation.y = 0.692
-    pt.pose.orientation.z = 0.065
-    pt.pose.orientation.w = 0.719
-    pt.pose.position.x += pos[0]
-    pt.pose.position.y += pos[1]
-    pt.pose.position.z += 0.18
+    # 0.639, -0.202, -0.326, 0.667
+    # 0.633, 0.383, -0.172, 0.650
+    # side: 0.305, 0.588, 0.389, 0.640
+    pt.pose.orientation.x = ori[0] 
+    pt.pose.orientation.y = ori[1]
+    pt.pose.orientation.z = ori[2]
+    pt.pose.orientation.w = ori[3]
+    pt.pose.position.x += pos[0] 
+    pt.pose.position.y += pos[1] + disp
+    pt.pose.position.z += 0.1
     waypoints = []
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.z -= 0.1
+    pt.pose.position.z -= 0.12
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.z += 0.1
-    waypoints.append(deepcopy(pt.pose))
-    gripper.close(100)
+    #gripper.close(100)
+    
+    
     arm.set_start_state(None)
     (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
     rospy.sleep(2)
     succeeded = arm.group[0].execute(plan)
     rospy.sleep(2)
+    gripper.open()
+    
+    # Retract arm
+    rospy.sleep(5)
+    new_waypoints = []
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.y += disp/2
+    pt.pose.position.z += 0.05
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.2
+    new_waypoints.append(deepcopy(pt.pose))
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(new_waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
+    return succeeded
+    
+
+def put_down_utensil(pos=None):
+    global right_arm, left_arm, right_gripper, left_gripper
+           
+    if not pos:
+        pos = collect_visual_demo(skip_check=True)
+    if pos[1] < -0.45:
+        arm = right_arm
+        gripper = right_gripper
+        ori = [0.006, 0.692, 0.065, 0.719]
+    else:
+        arm = left_arm
+        gripper = left_gripper
+        ori = [0.716, 0.014, -0.696, 0.053] #-0.690, 0.027, 0.722, 0.033] #0.714, 0.051, -0.698, 0.013]
+    transform = tfBuffer.lookup_transform('linear_actuator_link','table',rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+
+    pt.pose.orientation.x = ori[0] 
+    pt.pose.orientation.y = ori[1]
+    pt.pose.orientation.z = ori[2]
+    pt.pose.orientation.w = ori[3]
+    pt.pose.position.x += pos[0] - 0.02
+    pt.pose.position.y += pos[1]
+    pt.pose.position.z += 0.15
+    waypoints = []
+    waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.z -= 0.14
+    waypoints.append(deepcopy(pt.pose))
+    #gripper.close(100)
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
+    rospy.sleep(2)
+    gripper.open()
+    
+    # Retract arm
+    rospy.sleep(5)
+    new_waypoints = []
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.05
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.05
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.05
+    pt.pose.position.z += 0.2
+    new_waypoints.append(deepcopy(pt.pose))
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(new_waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
+    return succeeded
 
 
 def arm_homing():
-    global arm
-    jointTarget = [0.947, 5.015, 4.95, 1.144, 11.425, 4.870, 7.281]
-    arm.move_to_joint_pose(jointTarget)
-    rospy.sleep(3)
+    global right_arm, left_arm
+    right_jointTarget = [0.947, 5.015, 4.95, 1.144, 11.425, 4.870, 7.281]
+    right_arm.move_to_joint_pose(right_jointTarget)
+    left_jointTarget = [-3.986, 4.736, 4.3435, 5.028, 7.656, 1.151, -4.271]
+    left_arm.move_to_joint_pose(left_jointTarget)
+    rospy.sleep(2)
     
-
+def place_vase(pos=None):
+    global right_arm, left_arm, right_gripper, left_gripper
+           
+    if not pos:
+        pos = collect_visual_demo(skip_check=True)
+    if pos[1] < -0.45:
+        arm = right_arm
+        gripper = right_gripper
+        ori = [0.0, 0.0, 0.0, 1.0]
+    else:
+        arm = left_arm
+        gripper = left_gripper
+        ori = [1.0, 0.0, 0.0, 0.0]
+    transform = tfBuffer.lookup_transform('linear_actuator_link','table',rospy.Time(0), rospy.Duration(1.0))
+    ps = geometry_msgs.msg.PoseStamped()
+    ps.header.stamp = rospy.Time.now()
+    pt = tf2_geometry_msgs.do_transform_pose(ps, transform)
+    pt.header.stamp = rospy.Time.now()
+    pt.header.frame_id = 'linear_actuator_link'
+    pt.pose.orientation.x = ori[0] 
+    pt.pose.orientation.y = ori[1]
+    pt.pose.orientation.z = ori[2]
+    pt.pose.orientation.w = ori[3]
+    pt.pose.position.x += pos[0] - 0.04
+    pt.pose.position.y += pos[1]
+    pt.pose.position.z += 0.15
+    waypoints = []
+    waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.z -= 0.13
+    waypoints.append(deepcopy(pt.pose))
+    #gripper.close(100)
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
+    rospy.sleep(2)
+    gripper.open()
+    
+    # Retract arm
+    rospy.sleep(5)
+    new_waypoints = []
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.05
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.1
+    pt.pose.position.z += 0.05
+    new_waypoints.append(deepcopy(pt.pose))
+    pt.pose.position.x -= 0.05
+    pt.pose.position.z += 0.2
+    new_waypoints.append(deepcopy(pt.pose))
+    arm.set_start_state(None)
+    (plan, fraction) = arm.group[0].compute_cartesian_path(new_waypoints, 0.01, 0.0)
+    rospy.sleep(2)
+    succeeded = arm.group[0].execute(plan)
+    return succeeded
+    
 
 def acitve_var_set_a_table():
     global frames_client, features, arm
@@ -183,27 +398,31 @@ def acitve_var_set_a_table():
     env = collision_objects()
     env.publish_collision_objects()
     
-    arm_homing()
+    #arm_homing()
 
     rospy.Subscriber("ar_pose_marker", AlvarMarkers, update_marker_pose)
     rospy.wait_for_service('broadcast_object_frames')
     frames_client = rospy.ServiceProxy("broadcast_object_frames", BroadcastObjectFrames)
-    rospy.wait_for_service('active_var')
-    active_var_client = rospy.ServiceProxy("active_var", ActiveVaRQuery )
+    #rospy.wait_for_service('active_var')
+    #active_var_client = rospy.ServiceProxy("active_var", ActiveVaRQuery )
 
-    if not construct_world():
+    root = Tk()
+    my_gui = SimpleGUI(root)
+    root.mainloop()
+
+    '''if not construct_world():
         rospy.logerr("Failed to construct environment")
         return 
     
     iteration = 0
 
     demonstrations = []
-    for itr in range(5):
+    for itr in range(2):
         demo = collect_visual_demo()
         print("demo pose:",demo)
-        move_to_position(demo)
+        put_down_plate(demo)
     
-        arm_homing()
+        arm_homing()'''
     #iteration += 1
     # execute current policy
         
