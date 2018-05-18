@@ -234,10 +234,10 @@ def put_down_plate(pos=None):
     pt.pose.orientation.w = ori[3]
     pt.pose.position.x += pos[0] 
     pt.pose.position.y += pos[1] + disp
-    pt.pose.position.z += 0.1
+    pt.pose.position.z += 0.1 # TODO hardcode this to be table height
     waypoints = []
     waypoints.append(deepcopy(pt.pose))
-    pt.pose.position.z -= 0.12
+    pt.pose.position.z -= 0.1
     waypoints.append(deepcopy(pt.pose))
     #gripper.close(100)
     
