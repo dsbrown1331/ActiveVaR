@@ -16,6 +16,11 @@ from add_collision_objects import *
 from copy import deepcopy
 import matplotlib.pyplot as plt
 from Tkinter import *
+import numpy as np
+
+import active_utils as autils
+from plot_flower_queries import get_query_data 
+
 
 markers = {}
 
@@ -31,13 +36,16 @@ left_gripper = Gripper(prefix='left')
 
 demo_pos = (-0.2,-0.2)
 v = None
-c = None
 b = None
-p = None
+r = None
+o = None
+g = None
+
+goal_pose = (0.0,0.0)
 
 class SimpleGUI:
     def __init__(self, master):
-		global demo_pos,v,c,b,p
+		global demo_pos,v,r,g,b,o
 		self.master = master
 		master.title("User Interface for Set A Table Task")
 		m = PanedWindow(orient=VERTICAL)
@@ -46,14 +54,16 @@ class SimpleGUI:
 		self.label = Label(m, text="Select objects in current configuration:")
 		self.label.pack(anchor=W)
 		v = BooleanVar()
-		c = BooleanVar()
+		r = BooleanVar()
+		g = BooleanVar()
 		b = BooleanVar()
-		p = BooleanVar()
+		o = BooleanVar()
 		
 		obj_vase_button = Checkbutton(m, text="Vase", padx = 20, variable=v,onvalue=True, offvalue=False).pack(side=LEFT)
-		obj_cup_button = Checkbutton(m, text="Cup",padx = 20, variable=c,onvalue=True, offvalue=False).pack(side=LEFT)
-		obj_bowl_button = Checkbutton(m, text="Bowl",padx = 20, variable=b,onvalue=True, offvalue=False).pack(side=LEFT)
-		obj_plate_button = Checkbutton(m, text="Plate",padx = 20, variable=p,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_blue_button = Checkbutton(m, text="Blue",padx = 20, variable=b,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_rend_button = Checkbutton(m, text="Red",padx = 20, variable=r,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_green_button = Checkbutton(m, text="Green",padx = 20, variable=g,onvalue=True, offvalue=False).pack(side=LEFT)
+		obj_orange_button = Checkbutton(m, text="Orange",padx = 20, variable=o,onvalue=True, offvalue=False).pack(side=LEFT)
 
 		self.home_button = Button(master, text="Home Pose", command= arm_homing)
 		self.home_button.pack(fill=X,side=BOTTOM)
@@ -129,7 +139,7 @@ def construct_world(objects=None):
     #
     #
     #
-    global frames_client,v,c,b,p
+    global frames_client,v,c,b,p, goal_pose
     printed = False
     while not (0 in markers):
         if not printed:
@@ -166,9 +176,10 @@ def construct_world(objects=None):
     if not objects:
         objects = []
         if v.get():  objects.append("vase")
-        if c.get():  objects.append("cup")
-        if b.get():  objects.append("bowl")
-        if p.get():  objects.append("plate")
+        if r.get():  objects.append("red_bowl")
+        if g.get():  objects.append("green_plate")
+        if b.get():  objects.append("blue_cup")
+        if o.get():  objects.append("orange_cup")
         print objects
     object_poses = {}
 
@@ -181,16 +192,23 @@ def construct_world(objects=None):
 		obj_x = pt.pose.position.x
 		obj_y = pt.pose.position.y
 		rospy.loginfo('---> '+obj+' position: '+str(obj_x)+", "+str(obj_y))
-		object_poses[obj] = (obj_x,obj_y)
+		object_poses[obj] = (-obj_x,-obj_y)
     	
+    centers = np.array(object_poses.values())
+    #get leanred weights for MAP Reward function
+    filename = "./flowers_seed0_randomFalse_demo10.txt"
+    _, _, obj_weights, abs_weights, _, _  = get_query_data(filename)
+    map_reward = autils.RbfComplexReward(centers, obj_weights, abs_weights)
+    pi_map, _ = map_reward.estimate_best_placement()
+    print(pi_map)
     hlds = []
     plt.xlim(0,width)
-    plt.ylim(-height,0)
+    plt.ylim(height,0)
     for obj in object_poses:
-        hlds.append(plt.scatter(-object_poses[obj][1],object_poses[obj][0]))
-        plt.annotate(obj, (-object_poses[obj][1],object_poses[obj][0]))
-    #plt.legend(hlds,objects)
-    rospy.loginfo('Redeay to collect visual demos')
+        hlds.append(plt.scatter(object_poses[obj][1],object_poses[obj][0]))
+        plt.annotate(obj, (object_poses[obj][1],object_poses[obj][0]))
+    hlds.append(plt.scatter(pi_map[1],pi_map[0]))
+    plt.annotate('placement', (pi_map[1],pi_map[0]))
     plt.show()
     return True
 
